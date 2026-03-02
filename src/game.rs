@@ -3,8 +3,10 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, execute, terminal};
 use std::io::{Write, stdout};
-use std::{i32, io};
+use std::os::linux::raw::stat;
+use std::{i32, io, string};
 
+use crate::game_object::{Dialogue, EventStep, GameEvent, GameObjectID};
 use crate::map::*;
 use crate::vector2::*;
 
@@ -14,12 +16,30 @@ use kira::{
 };
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum GameState {
+    Normal,
+    Dialogue,
+    Combat,
+    Menu,
+}
 pub struct Game {
     pub map: Map,
     pub camera: Vector2,
+    pub audio_manager: AudioManager,
+    pub state: GameState,
+    // game screen measurements
     pub screen_size: Vector2,
     pub screen_margins: Vector2,
-    pub audio_manager: AudioManager,
+    // padding measurements
+    /// distance between the game world and the seperators (|) and the distance between seperators and the dialogue text
+    pub dialogue_padding: usize,
+    /// distance between the top of the screen and the dialogue text
+    pub dialogue_text_padding: usize,
+    /// distance between the dialogue text and the selections
+    pub dialogue_selection_text_padding: usize,
+    /// max number of character to render while in dialogue
+    pub dialogue_max_character_count: usize,
 }
 
 pub fn run() -> io::Result<()> {
@@ -35,9 +55,14 @@ pub fn run() -> io::Result<()> {
             CustomColor::new(0, 255, 0),
         ),
         camera: Vector2::zero(),
+        audio_manager: generate_audio_manager().expect("Failed to initialize audio"),
+        state: GameState::Normal,
         screen_size: Vector2::new(50, 20),
         screen_margins: Vector2::new(5, 3),
-        audio_manager: generate_audio_manager().expect("Failed to initialize audio"),
+        dialogue_padding: 5,
+        dialogue_text_padding: 2,
+        dialogue_selection_text_padding: 2,
+        dialogue_max_character_count: 50,
     };
 
     if let Some(id) = game.map.insert_object(
@@ -59,7 +84,35 @@ pub fn run() -> io::Result<()> {
         Vector2::new(3, 3),
         "♥︎".custom_color(CustomColor::new(180, 0, 0)),
     ) {
-        game.map.insert_input_component(id);
+        let mut events: Vec<EventStep> = Vec::new();
+        events.push(EventStep {
+            event: crate::game_object::GameEvent::Dialogue(crate::game_object::Dialogue {
+                text: "This is a dialogue".to_string(),
+                selections: vec![
+                    "This is a selection".to_string(),
+                    "This is a selection too".to_string(),
+                ],
+                selections_pointing_event: vec![-1, -1],
+                current_selection: 0,
+            }),
+            requirement: crate::game_object::EventCondition::None,
+            repeat_if_unmet: true,
+            is_triggered: false,
+            trigger_next_event: true,
+        });
+        events.push(EventStep {
+            event: crate::game_object::GameEvent::Dialogue(crate::game_object::Dialogue {
+                text: "This is the next dialogue".to_string(),
+                selections: vec![],
+                selections_pointing_event: vec![],
+                current_selection: 0,
+            }),
+            requirement: crate::game_object::EventCondition::None,
+            repeat_if_unmet: true,
+            is_triggered: false,
+            trigger_next_event: true,
+        });
+        game.map.insert_event_component(id, events);
     }
 
     let mut frame_number: i32 = 0;
@@ -99,15 +152,108 @@ fn process_input(key: KeyCode, game: &mut Game) -> bool {
         println!("Quitting... \r");
         return false;
     }
-    match key {
-        KeyCode::Up => move_objects(Vector2::new(0, -1), game),
-        KeyCode::Down => move_objects(Vector2::new(0, 1), game),
-        KeyCode::Left => move_objects(Vector2::new(-1, 0), game),
-        KeyCode::Right => move_objects(Vector2::new(1, 0), game),
-        //KeyCode::Char('e') => process_input(0, 0, &mut game),
+    match &game.state {
+        GameState::Normal => match key {
+            KeyCode::Up => move_objects(Vector2::new(0, -1), game),
+            KeyCode::Down => move_objects(Vector2::new(0, 1), game),
+            KeyCode::Left => move_objects(Vector2::new(-1, 0), game),
+            KeyCode::Right => move_objects(Vector2::new(1, 0), game),
+            KeyCode::Char('e') => {
+                let _ = trigger_event_nearby(game);
+            }
+            _ => {}
+        },
+        GameState::Dialogue => match key {
+            KeyCode::Up => {
+                let _ = change_dialogue_selection(game, -1);
+            },
+            KeyCode::Down => {
+                let _ = change_dialogue_selection(game, 1);
+            },
+            KeyCode::Char('e') => {
+                let _ = progress_event(game);
+            }
+            _ => {}
+        },
         _ => {}
     }
     return true;
+}
+
+fn change_dialogue_selection(game: &mut Game, direction: i32) -> Option<()> {
+    let event = game
+        .map
+        .event_components
+        .get_mut(&game.map.current_event_id)?;
+
+    if let GameEvent::Dialogue(ref mut dialogue) = event.events[event.current_index].event {
+        let len = dialogue.selections.len() as i32;
+        if len > 0 {
+            let new_index = (dialogue.current_selection as i32 + direction + len) % len;
+            dialogue.current_selection = new_index as usize;
+        }
+    }
+
+    return Some(());
+}
+
+fn progress_event(game: &mut Game) -> Option<()> {
+    let event = game
+        .map
+        .event_components
+        .get_mut(&game.map.current_event_id)?;
+
+    match event.events[event.current_index].requirement {
+        crate::game_object::EventCondition::None => 'none: {
+            game.state = GameState::Normal;
+            let GameEvent::Dialogue(ref dialogue) = event.events[event.current_index].event else {
+                event.current_index = (event.current_index + 1).clamp(0, event.events.len() - 1);
+                break 'none;
+            };
+            if dialogue.selections_pointing_event.is_empty() || dialogue.selections_pointing_event[dialogue.current_selection] == -1 {
+                let new_index = (event.current_index + 1).clamp(0, event.events.len() - 1);
+                
+                if event.events[event.current_index].trigger_next_event && event.current_index != new_index {
+                    event.current_index = new_index;
+                    trigger_event_nearby(game);
+                }
+                break 'none;
+            }
+
+            if event.events[event.current_index].trigger_next_event {
+                event.current_index = dialogue.selections_pointing_event[dialogue.current_selection] as usize;
+                trigger_event_nearby(game);
+            }
+        }
+    }
+
+    return Some(());
+}
+
+fn trigger_event_nearby(game: &mut Game) -> Option<()> {
+    let id = game
+        .map
+        .get_event_around_this_position(game.map.objects[game.map.camera_operator].position)?;
+    let event = game.map.event_components.get_mut(&id)?;
+
+    if event.events[event.current_index].is_triggered
+        && !event.events[event.current_index].repeat_if_unmet
+    {
+        return Some(());
+    }
+
+    match &event.events[event.current_index].event {
+        GameEvent::Dialogue(_text) => {
+            game.state = GameState::Dialogue;
+            game.map.current_event_id = id;
+        }
+        GameEvent::Combat(id) => {}
+        GameEvent::TriggerObjectEvent(id) => {}
+    }
+
+    event.events[event.current_index].is_triggered = true;
+
+    Some(())
 }
 
 fn move_objects(direction: Vector2, game: &mut Game) {
@@ -117,7 +263,7 @@ fn move_objects(direction: Vector2, game: &mut Game) {
         let next_position: Vector2 = game.map.objects[id].position + direction;
 
         if game.map.is_out_of_bounds(next_position) {
-            return;
+            continue;
         }
 
         if let Some(moveable_id) = game.map.positions_hashmap.get(&next_position)
@@ -164,6 +310,61 @@ fn render(game: &Game) {
                 buffer.push_str(&game.map.objects[*id].icon.to_string());
             } else {
                 buffer.push_str(&game.map.ground_icon.to_string());
+            }
+        }
+        match &game.state {
+            GameState::Dialogue => 'dialogue: {
+                buffer.push_str(&" ".repeat(game.dialogue_padding));
+                buffer.push_str("|");
+                buffer.push_str(&" ".repeat(game.dialogue_padding));
+
+                let Some(event) = game.map.event_components.get(&game.map.current_event_id) else {
+                    break 'dialogue;
+                };
+                let GameEvent::Dialogue(dialogue) = &event.events[event.current_index].event else {
+                    break 'dialogue;
+                };
+
+                let dialogue_line_index = (y - game.dialogue_text_padding as i32) as usize;
+
+                let text_chars = dialogue.text.chars().count();
+                let text_line_count = (text_chars + game.dialogue_max_character_count - 1)
+                    / game.dialogue_max_character_count;
+
+                if dialogue_line_index < text_line_count {
+                    let start = dialogue_line_index * game.dialogue_max_character_count;
+                    let line_text: String = dialogue
+                        .text
+                        .chars()
+                        .skip(start)
+                        .take(game.dialogue_max_character_count)
+                        .collect();
+                    buffer.push_str(&line_text);
+                    buffer.push_str(
+                        &" ".repeat(game.dialogue_max_character_count - line_text.chars().count()),
+                    );
+                } else if dialogue_line_index
+                    >= text_line_count + game.dialogue_selection_text_padding
+                {
+                    let selection_line_index = dialogue_line_index
+                        - text_line_count
+                        - game.dialogue_selection_text_padding;
+                    let Some(selection_text) = dialogue.selections.get(selection_line_index) else {
+                        buffer.push_str(&" ".repeat(game.dialogue_max_character_count));
+                        break 'dialogue;
+                    };
+
+                    if dialogue.current_selection == selection_line_index {
+                        buffer.push_str(&selection_text.custom_color(CustomColor::new(255, 0, 0)).to_string() );
+                    } else {
+                        buffer.push_str(&selection_text);
+                    }
+                }
+            }
+            _ => {
+                buffer.push_str(
+                    &" ".repeat(game.dialogue_padding * 2 + 1 + game.dialogue_max_character_count),
+                );
             }
         }
         buffer.push_str("\r\n");
