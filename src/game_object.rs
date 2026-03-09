@@ -15,9 +15,13 @@ pub struct Dialogue {
     pub current_selection: usize
 }
 
+pub const COMBAT_SELECTIONS: &[&str] = &["Fight", "Item", "Run"];
+pub struct Combat { 
+    pub current_selection: usize,
+}
 pub enum GameEvent {
     Dialogue(Dialogue),
-    Combat(GameObjectID),
+    Combat(Combat),
     TriggerObjectEvent(GameObjectID),
 }
 pub enum EventCondition {

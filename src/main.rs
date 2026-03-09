@@ -2,6 +2,7 @@ mod game;
 mod game_object;
 mod map;
 mod vector2;
+mod renderer;
 
 fn main() {
     if let Err(e) = crate::game::run() {
