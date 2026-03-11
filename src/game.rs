@@ -2,17 +2,21 @@ use colored::*;
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, execute, terminal};
+use rand;
+use std::ffi::c_float;
 use std::io::{Write, stdout};
 use std::{i32, io};
 
-use crate::game_object::{COMBAT_SELECTIONS, Combat, EventStep, GameEvent};
+use crate::game_object::{
+    COMBAT_SELECTIONS, Combat, EnemyAttack, EventStep, GameEvent, Projectile, StatsComponent,
+};
 use crate::map::*;
 use crate::renderer::Renderer;
 use crate::vector2::*;
 
 use colored::control;
 use kira::{AudioManager, AudioManagerSettings, DefaultBackend};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GameState {
@@ -50,9 +54,10 @@ impl Game {
                 50,
                 7,
                 9,
-                20,
+                30,
                 5,
-                1
+                1,
+                3,
             ),
         }
     }
@@ -63,6 +68,8 @@ impl Game {
             "♥︎".custom_color(CustomColor::new(255, 0, 0)),
         ) {
             self.map.insert_input_component(id);
+            self.map
+                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 1));
             self.map.camera_operator = id;
         }
 
@@ -77,9 +84,21 @@ impl Game {
             Vector2::new(3, 3),
             "♥︎".custom_color(CustomColor::new(180, 0, 0)),
         ) {
+            self.map
+                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 1));
+
             let mut events: Vec<EventStep> = Vec::new();
             events.push(EventStep {
-                event: crate::game_object::GameEvent::Combat(Combat { current_selection: 0 }),
+                event: crate::game_object::GameEvent::Combat(Combat::new(
+                    crate::game_object::CombatPhase::PlayerTurn,
+                    true,
+                    false,
+                    1000,
+                    5,
+                    5,
+                    100,
+                    300,
+                )),
                 requirement: crate::game_object::EventCondition::None,
                 repeat: true,
                 is_triggered: false,
@@ -136,8 +155,14 @@ impl Game {
                 KeyCode::Right => {
                     let _ = self.change_combat_selection(1);
                 }
+                KeyCode::Up => {
+                    let _ = self.combat_movement(-1);
+                }
+                KeyCode::Down => {
+                    let _ = self.combat_movement(1);
+                }
                 KeyCode::Char('e') => {
-                    let _ = self.progress_event();
+                    let _ = self.select_combat_choice();
                 }
                 _ => {}
             },
@@ -147,10 +172,8 @@ impl Game {
     }
 
     fn change_dialogue_selection(&mut self, direction: i32) -> Option<()> {
-        let event = self
-            .map
-            .event_components
-            .get_mut(&self.map.current_event_id)?;
+        let event_id = self.map.current_event_id?;
+        let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Dialogue(ref mut dialogue) = event.events[event.current_index].event {
             let len = dialogue.selections.len() as i32;
@@ -163,10 +186,8 @@ impl Game {
         return Some(());
     }
     fn change_combat_selection(&mut self, direction: i32) -> Option<()> {
-        let event = self
-            .map
-            .event_components
-            .get_mut(&self.map.current_event_id)?;
+        let event_id = self.map.current_event_id?;
+        let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event {
             let len = COMBAT_SELECTIONS.len() as i32;
@@ -178,12 +199,62 @@ impl Game {
 
         return Some(());
     }
+    fn combat_movement(&mut self, direction: i32) -> Option<()> {
+        let event_id = self.map.current_event_id?;
+        let event = self.map.event_components.get_mut(&event_id)?;
+
+        if let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event {
+            if matches!(
+                combat.current_phase,
+                crate::game_object::CombatPhase::EnemyAttack(_)
+            ) {
+                combat.player_row = (combat.player_row as i32 + direction).clamp(0, 2) as usize;
+            }
+        }
+        Some(())
+    }
+    fn select_combat_choice(&mut self) -> Option<()> {
+        let event_id = self.map.current_event_id?;
+        let event = self.map.event_components.get_mut(&event_id)?;
+
+        if let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event {
+            let player_stats = self.map.stats_components.get(&self.map.camera_operator)?;
+            let enemy_stats = self.map.stats_components.get(&event_id)?;
+            match COMBAT_SELECTIONS[combat.current_selection] {
+                "Fight" => {
+                    let damage = player_stats.calculate_damage(enemy_stats);
+
+                    self.map
+                        .stats_components
+                        .get_mut(&event_id)?
+                        .take_damage(damage); // ehhh fuck it
+
+                    combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
+                    self.renderer.combat_message = format!("You dealt {} damage.", damage);
+                }
+                "Item" => {}
+                "Run" => {
+                    if player_stats.agility > enemy_stats.agility {
+                        self.state = GameState::Normal;
+                    } else if player_stats.agility <= enemy_stats.agility
+                        && rand::random::<f32>() < 0.30
+                    {
+                        self.state = GameState::Normal;
+                    } else {
+                        self.renderer.combat_message = String::from("Can't run away.");
+                        combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        return Some(());
+    }
 
     fn progress_event(&mut self) -> Option<()> {
-        let event = self
-            .map
-            .event_components
-            .get_mut(&self.map.current_event_id)?;
+        let event_id = self.map.current_event_id?;
+        let event = self.map.event_components.get_mut(&event_id)?;
 
         match event.events[event.current_index].requirement {
             crate::game_object::EventCondition::None => 'none: {
@@ -236,20 +307,61 @@ impl Game {
         }
 
         match &event.events[event.current_index].event {
-            GameEvent::Dialogue(_text) => {
+            GameEvent::Dialogue(_) => {
                 self.state = GameState::Dialogue;
-                self.map.current_event_id = id;
+                self.map.current_event_id = Some(id);
             }
             GameEvent::Combat(combat) => {
                 self.state = GameState::Combat;
-                self.map.current_event_id = id;
+                self.map.current_event_id = Some(id);
+
+                if !combat.turn_order_decided {
+                    self.decide_turn_order();
+                }
             }
-            GameEvent::TriggerObjectEvent(id) => {}
+            GameEvent::TriggerObjectEvent(_) => {}
         }
 
-        event.events[event.current_index].is_triggered = true;
-
+        if let Some(event) = self.map.event_components.get_mut(&id) {
+            event.events[event.current_index].is_triggered = true;
+        }
         Some(())
+    }
+
+    fn decide_turn_order(&mut self) {
+        let Some(event_id) = self.map.current_event_id else {
+            return;
+        };
+        let player_ag = self
+            .map
+            .stats_components
+            .get(&self.map.camera_operator)
+            .map(|s| s.agility)
+            .unwrap_or(1);
+        let enemy_ag = self
+            .map
+            .stats_components
+            .get(&event_id)
+            .map(|s| s.agility)
+            .unwrap_or(1);
+
+        let player_goes_first = player_ag > enemy_ag || rand::random::<f32>() < 0.30;
+
+        let Some(event) = self.map.event_components.get_mut(&event_id) else {
+            return;
+        };
+        let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event else {
+            return;
+        };
+        combat.player_goes_first = player_goes_first;
+        combat.turn_order_decided = true;
+
+        if !player_goes_first {
+            combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
+            self.renderer.combat_message = String::from("Enemy acts");
+        } else {
+            self.renderer.combat_message = String::from("You act");
+        }
     }
 
     fn move_objects(&mut self, direction: Vector2) {
@@ -294,6 +406,101 @@ impl Game {
             self.camera.y += direction.y;
         }
     }
+
+    pub fn tick(&mut self, delta_ms: usize) {
+        let Some(event_id) = self.map.current_event_id else {
+            return;
+        };
+        let Some(event) = self.map.event_components.get_mut(&event_id) else {
+            return;
+        };
+        match &mut event.events[event.current_index].event {
+            GameEvent::Combat(combat) => match &mut combat.current_phase {
+                crate::game_object::CombatPhase::TurnResult(player_turn) => {
+                    combat.turn_result_timer += delta_ms;
+                    if combat.turn_result_timer >= combat.turn_result_time {
+                        let Some(enemy_stats) = self.map.stats_components.get(&event_id) else {
+                            return;
+                        };
+                        let Some(player_stats) =
+                            self.map.stats_components.get(&self.map.camera_operator)
+                        else {
+                            return;
+                        };
+
+                        self.renderer.combat_message = String::from("");
+                        if enemy_stats.is_dead() {
+                            self.renderer.combat_message = String::from("");
+                        } else if player_stats.is_dead() {
+                        } else if *player_turn {
+                            combat.current_phase = crate::game_object::CombatPhase::EnemyAttack(
+                                EnemyAttack::new(combat),
+                            );
+                        } else {
+                            combat.current_phase = crate::game_object::CombatPhase::PlayerTurn;
+                        }
+                        combat.turn_result_timer = 0
+                    }
+                }
+                crate::game_object::CombatPhase::EnemyAttack(enemy_attack) => {
+                    enemy_attack.move_timer += delta_ms;
+                    enemy_attack.next_spawn_timer += delta_ms;
+
+                    if enemy_attack.next_spawn_timer >= combat.projectile_spawn_time
+                        && enemy_attack.projectile_count > 0
+                    {
+                        enemy_attack.projectiles.push(Projectile {
+                            x: 0,
+                            row: rand::random_range(0..3),
+                            damage: combat.projectile_damage,
+                        });
+                        enemy_attack.next_spawn_timer = 0;
+                        enemy_attack.projectile_count -= 1;
+                    }
+                    if enemy_attack.move_timer >= combat.projectile_move_time {
+                        for projectile in &mut enemy_attack.projectiles {
+                            projectile.x += 1;
+                        }
+
+                        let base = self.renderer.combat_character_padding_x
+                            + self.renderer.combat_characters_distance
+                            + 1;
+                        enemy_attack.projectiles.retain(|projectile| {
+                            if projectile.row == combat.player_row
+                                && projectile.x == self.renderer.combat_characters_distance + 1
+                            {
+                                enemy_attack.damage_dealt += projectile.damage;
+                                return false;
+                            }
+                            if projectile.x >= base {
+                                return false;
+                            }
+                            true
+                        });
+
+                        enemy_attack.move_timer = 0;
+                    }
+
+                    if enemy_attack.projectile_count == 0 && enemy_attack.projectiles.is_empty() {
+                        if enemy_attack.damage_dealt > 0 {
+                            if let Some(stats) =
+                                self.map.stats_components.get_mut(&self.map.camera_operator)
+                            {
+                                stats.take_damage(enemy_attack.damage_dealt);
+                            }
+                            self.renderer.combat_message =
+                                format!("Enemy dealt {} damage.", enemy_attack.damage_dealt);
+                        } else {
+                            self.renderer.combat_message = format!("Took no damage.",);
+                        }
+                        combat.current_phase = crate::game_object::CombatPhase::TurnResult(false);
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
 }
 
 fn generate_audio_manager() -> Result<AudioManager, Box<dyn std::error::Error>> {
@@ -311,7 +518,12 @@ pub fn run() -> io::Result<()> {
     game.setup_objects();
 
     let mut frame_number: i32 = 0;
+    let mut last_frame = Instant::now();
+
     loop {
+        let delta_ms = last_frame.elapsed().as_millis() as usize;
+        last_frame = Instant::now();
+
         execute!(stdout, cursor::MoveTo(0, 0))?;
 
         print!("{}\r\n", frame_number);
@@ -320,6 +532,8 @@ pub fn run() -> io::Result<()> {
         game.renderer.render(&game.map, &game.camera, &game.state);
 
         stdout.flush()?;
+
+        game.tick(delta_ms);
 
         if event::poll(Duration::from_millis(0))?
             && let Event::Key(KeyEvent { code, .. }) = event::read()?

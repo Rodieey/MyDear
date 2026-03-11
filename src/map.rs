@@ -8,13 +8,14 @@ pub struct Map {
     pub objects: Vec<GameObject>,
     pub positions_hashmap: HashMap<Vector2, GameObjectID>,
     pub ground_icon: ColoredString,
-    pub current_event_id: GameObjectID,
-
+    
     pub moveable_components: HashMap<GameObjectID, MoveableComponent>,
     pub input_components: HashMap<GameObjectID, InputComponent>,
     pub event_components: HashMap<GameObjectID, EventComponent>,
-
+    pub stats_components: HashMap<GameObjectID, StatsComponent>,
+    
     pub camera_operator: GameObjectID, // this fella is gonna control the camera
+    pub current_event_id: Option<GameObjectID>,
 }
 impl Map {
     pub fn new(_map_size: Vector2, _ground_icon: String, _ground_color: CustomColor) -> Self {
@@ -23,11 +24,12 @@ impl Map {
             objects: Vec::new(),
             positions_hashmap: HashMap::new(),
             ground_icon: _ground_icon.custom_color(_ground_color),
-            current_event_id: 0,
             moveable_components: HashMap::new(),
             input_components: HashMap::new(),
             event_components: HashMap::new(),
+            stats_components: HashMap::new(),
             camera_operator: 0,
+            current_event_id: None,
         }
     }
 
@@ -56,6 +58,9 @@ impl Map {
     pub fn insert_input_component(&mut self, id: GameObjectID) {
         Self::insert_component(InputComponent, &mut self.input_components, id);
     }
+    pub fn insert_stats_component(&mut self, id: GameObjectID, stats: StatsComponent) {
+        Self::insert_component(stats, &mut self.stats_components, id);
+    }
     pub fn insert_event_component(&mut self, id: GameObjectID, events: Vec<EventStep>) {
         Self::insert_component(
             EventComponent {
@@ -66,7 +71,6 @@ impl Map {
             id,
         );
     }
-
     fn insert_component<T>(
         what_component: T,
         component_hashmap: &mut HashMap<GameObjectID, T>,
