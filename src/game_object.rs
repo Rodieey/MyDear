@@ -1,5 +1,3 @@
-use std::string;
-
 use crate::vector2::Vector2;
 use colored::*;
 
@@ -36,16 +34,19 @@ impl StatsComponent {
     }
 
     pub fn take_damage(&mut self, amount: usize) {
-        self.health = self.health.saturating_sub(amount);
+        self.set_health(self.health - amount);
+    }
+    pub fn heal(&mut self, amount: usize) {
+        self.set_health(self.health + amount);
     }
     pub fn set_health(&mut self, amount: usize) {
-        self.health = amount;
+        self.health = amount.clamp(0, self.max_health);
     }
     pub fn is_dead(&self) -> bool {
-        self.health == 0
+        return self.health == 0;
     }
     pub fn health(&self) -> usize {
-        self.health
+        return self.health;
     }
     pub fn calculate_damage(&self, stat_to_attack: &StatsComponent) -> usize {
         let base = (self.strength as i32 - stat_to_attack.defense as i32).max(1) as usize;
@@ -66,12 +67,15 @@ pub struct Dialogue {
 
 pub const COMBAT_SELECTIONS: &[&str] = &["Fight", "Item", "Run"];
 
-pub type PlayersTurn = bool;
+pub enum TurnResult {
+    WasPlayersTurn,
+    WasEnemiesTurn,
+    CombatEnded,
+}
 pub enum CombatPhase {
     PlayerTurn,
     EnemyAttack(EnemyAttack),
-    TurnResult(PlayersTurn),
-    CombatEnd { player_won: bool },
+    TurnResult(TurnResult),
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnemyAttack {
@@ -115,6 +119,7 @@ pub struct Combat {
     pub turn_result_time: usize,
     /// internal timer for turn result
     pub turn_result_timer: usize,
+    pub projectile_icon: ColoredString,
     pub projectile_damage: usize,
     pub projectile_count: usize,
     /// ms took to move a projectile
@@ -131,6 +136,7 @@ impl Combat {
         player_goes_first: bool,
         turn_order_decided: bool,
         turn_result_time: usize,
+        projectile_icon: ColoredString,
         projectile_damage: usize,
         projectile_count: usize,
         projectile_move_time: usize,
@@ -143,6 +149,7 @@ impl Combat {
             turn_order_decided,
             turn_result_time,
             turn_result_timer: 0,
+            projectile_icon,
             projectile_damage,
             projectile_count,
             projectile_move_time,

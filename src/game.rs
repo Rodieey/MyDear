@@ -3,12 +3,12 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, execute, terminal};
 use rand;
-use std::ffi::c_float;
 use std::io::{Write, stdout};
 use std::{i32, io};
 
 use crate::game_object::{
-    COMBAT_SELECTIONS, Combat, EnemyAttack, EventStep, GameEvent, Projectile, StatsComponent,
+    COMBAT_SELECTIONS, Combat, CombatPhase, Dialogue, EnemyAttack, EventCondition, EventStep,
+    GameEvent, GameObjectID, Projectile, StatsComponent, TurnResult,
 };
 use crate::map::*;
 use crate::renderer::Renderer;
@@ -89,33 +89,34 @@ impl Game {
 
             let mut events: Vec<EventStep> = Vec::new();
             events.push(EventStep {
-                event: crate::game_object::GameEvent::Combat(Combat::new(
-                    crate::game_object::CombatPhase::PlayerTurn,
+                event: GameEvent::Combat(Combat::new(
+                    CombatPhase::PlayerTurn,
                     true,
                     false,
                     1000,
+                    "#".custom_color(CustomColor::new(255, 255, 0)),
                     5,
                     5,
                     100,
                     300,
                 )),
-                requirement: crate::game_object::EventCondition::None,
+                requirement: EventCondition::None,
+                repeat: true,
+                is_triggered: false,
+                next_event: Some(1),
+            });
+            events.push(EventStep {
+                event: GameEvent::Dialogue(Dialogue {
+                    text: "You win the fight and this is a dialogue".to_string(),
+                    selections: vec![],
+                    selections_pointing_event: vec![],
+                    current_selection: 0,
+                }),
+                requirement: EventCondition::None,
                 repeat: true,
                 is_triggered: false,
                 next_event: None,
             });
-            //events.push(EventStep {
-            //    event: crate::game_object::GameEvent::Dialogue(Dialogue {
-            //        text: "this is a dialogue".to_string(),
-            //        selections: vec![],
-            //        selections_pointing_event: vec![],
-            //        current_selection: 0,
-            //    }),
-            //    requirement: crate::game_object::EventCondition::None,
-            //    repeat: true,
-            //    is_triggered: false,
-            //    next_event: None,
-            //});
             self.map.insert_event_component(id, events);
         }
     }
@@ -204,10 +205,7 @@ impl Game {
         let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event {
-            if matches!(
-                combat.current_phase,
-                crate::game_object::CombatPhase::EnemyAttack(_)
-            ) {
+            if matches!(combat.current_phase, CombatPhase::EnemyAttack(_)) {
                 combat.player_row = (combat.player_row as i32 + direction).clamp(0, 2) as usize;
             }
         }
@@ -229,7 +227,7 @@ impl Game {
                         .get_mut(&event_id)?
                         .take_damage(damage); // ehhh fuck it
 
-                    combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
+                    combat.current_phase = CombatPhase::TurnResult(TurnResult::WasPlayersTurn);
                     self.renderer.combat_message = format!("You dealt {} damage.", damage);
                 }
                 "Item" => {}
@@ -242,7 +240,7 @@ impl Game {
                         self.state = GameState::Normal;
                     } else {
                         self.renderer.combat_message = String::from("Can't run away.");
-                        combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
+                        combat.current_phase = CombatPhase::TurnResult(TurnResult::WasPlayersTurn);
                     }
                 }
                 _ => {}
@@ -257,7 +255,7 @@ impl Game {
         let event = self.map.event_components.get_mut(&event_id)?;
 
         match event.events[event.current_index].requirement {
-            crate::game_object::EventCondition::None => 'none: {
+            EventCondition::None => 'none: {
                 match event.events[event.current_index].event {
                     GameEvent::Dialogue(ref dialogue) => {
                         self.state = GameState::Normal;
@@ -267,7 +265,7 @@ impl Game {
                                 break 'none;
                             };
                             event.current_index = next_index;
-                            self.trigger_event_nearby();
+                            self.trigger_event(event_id);
                             break 'none;
                         }
 
@@ -279,14 +277,20 @@ impl Game {
                                 break 'none;
                             };
                             event.current_index = next_index;
-                            self.trigger_event_nearby();
+                            self.trigger_event(event_id);
                             break 'none;
                         };
                         event.current_index = next_index;
-                        self.trigger_event_nearby();
+                        self.trigger_event(event_id);
                     }
-                    GameEvent::Combat(ref id) => {}
-                    GameEvent::TriggerObjectEvent(ref id) => {}
+                    GameEvent::Combat(_) => {
+                        let Some(next_index) = event.events[event.current_index].next_event else {
+                            break 'none;
+                        };
+                        event.current_index = next_index;
+                        self.trigger_event(event_id);
+                    }
+                    GameEvent::TriggerObjectEvent(_) => {}
                 }
             }
         }
@@ -298,6 +302,13 @@ impl Game {
         let id = self
             .map
             .get_event_around_this_position(self.map.objects[self.map.camera_operator].position)?;
+
+        self.trigger_event(id);
+
+        Some(())
+    }
+
+    fn trigger_event(&mut self, id: GameObjectID) -> Option<()> {
         let event = self.map.event_components.get_mut(&id)?;
 
         if event.events[event.current_index].is_triggered
@@ -325,6 +336,7 @@ impl Game {
         if let Some(event) = self.map.event_components.get_mut(&id) {
             event.events[event.current_index].is_triggered = true;
         }
+
         Some(())
     }
 
@@ -357,10 +369,11 @@ impl Game {
         combat.turn_order_decided = true;
 
         if !player_goes_first {
-            combat.current_phase = crate::game_object::CombatPhase::TurnResult(true);
             self.renderer.combat_message = String::from("Enemy acts");
+            combat.current_phase = CombatPhase::TurnResult(TurnResult::WasPlayersTurn);
         } else {
             self.renderer.combat_message = String::from("You act");
+            combat.current_phase = CombatPhase::TurnResult(TurnResult::WasEnemiesTurn);
         }
     }
 
@@ -416,9 +429,14 @@ impl Game {
         };
         match &mut event.events[event.current_index].event {
             GameEvent::Combat(combat) => match &mut combat.current_phase {
-                crate::game_object::CombatPhase::TurnResult(player_turn) => {
+                CombatPhase::TurnResult(turn_result) => {
                     combat.turn_result_timer += delta_ms;
                     if combat.turn_result_timer >= combat.turn_result_time {
+                        if matches!(turn_result, TurnResult::CombatEnded) {
+                            self.progress_event();
+                            return;
+                        }
+
                         let Some(enemy_stats) = self.map.stats_components.get(&event_id) else {
                             return;
                         };
@@ -430,19 +448,27 @@ impl Game {
 
                         self.renderer.combat_message = String::from("");
                         if enemy_stats.is_dead() {
-                            self.renderer.combat_message = String::from("");
+                            self.renderer.combat_message = String::from("Enemy lost.");
+                            combat.current_phase = CombatPhase::TurnResult(TurnResult::CombatEnded);
                         } else if player_stats.is_dead() {
-                        } else if *player_turn {
-                            combat.current_phase = crate::game_object::CombatPhase::EnemyAttack(
-                                EnemyAttack::new(combat),
-                            );
+                            self.renderer.combat_message = String::from("You lost.");
+                            combat.current_phase = CombatPhase::TurnResult(TurnResult::CombatEnded);
                         } else {
-                            combat.current_phase = crate::game_object::CombatPhase::PlayerTurn;
+                            match turn_result {
+                                TurnResult::WasPlayersTurn => {
+                                    combat.current_phase =
+                                        CombatPhase::EnemyAttack(EnemyAttack::new(combat));
+                                }
+                                TurnResult::WasEnemiesTurn => {
+                                    combat.current_phase = CombatPhase::PlayerTurn;
+                                }
+                                _ => {}
+                            }
                         }
                         combat.turn_result_timer = 0
                     }
                 }
-                crate::game_object::CombatPhase::EnemyAttack(enemy_attack) => {
+                CombatPhase::EnemyAttack(enemy_attack) => {
                     enemy_attack.move_timer += delta_ms;
                     enemy_attack.next_spawn_timer += delta_ms;
 
@@ -493,7 +519,7 @@ impl Game {
                         } else {
                             self.renderer.combat_message = format!("Took no damage.",);
                         }
-                        combat.current_phase = crate::game_object::CombatPhase::TurnResult(false);
+                        combat.current_phase = CombatPhase::TurnResult(TurnResult::WasEnemiesTurn);
                     }
                 }
                 _ => {}

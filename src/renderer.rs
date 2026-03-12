@@ -1,7 +1,7 @@
 use colored::*;
 
 use crate::game::GameState;
-use crate::game_object::{COMBAT_SELECTIONS, GameEvent, Projectile};
+use crate::game_object::{COMBAT_SELECTIONS, CombatPhase, GameEvent};
 use crate::map::Map;
 use crate::vector2::Vector2;
 
@@ -177,7 +177,7 @@ impl Renderer {
         };
 
         match &combat.current_phase {
-            crate::game_object::CombatPhase::EnemyAttack(enemy_attack) => {
+            CombatPhase::EnemyAttack(enemy_attack) => {
                 let base = self.combat_character_padding_x + self.combat_characters_distance + 1;
                 let line_width = self.screen_size.x as usize;
 
@@ -226,7 +226,7 @@ impl Renderer {
 
                     if col >= last_pos {
                         buffer.push_str(&" ".repeat(col - last_pos));
-                        buffer.push('#');
+                        buffer.push_str(&combat.projectile_icon.to_string());
                         last_pos = col + 1;
                     }
                 }
@@ -250,7 +250,7 @@ impl Renderer {
         if y == self.combat_character_padding_y as i32
             && !matches!(
                 combat.current_phase,
-                crate::game_object::CombatPhase::EnemyAttack(_)
+                CombatPhase::EnemyAttack(_)
             )
         {
             buffer.push_str(&" ".repeat(self.combat_character_padding_x));
@@ -295,7 +295,7 @@ impl Renderer {
             let mut raw_len: usize = 0;
 
             match &combat.current_phase {
-                crate::game_object::CombatPhase::PlayerTurn => {
+                CombatPhase::PlayerTurn => {
                     let selections_text = COMBAT_SELECTIONS
                         .iter()
                         .enumerate()
