@@ -1,12 +1,18 @@
 use crate::vector2::Vector2;
 use colored::*;
+use serde::{Deserialize, Serialize};
 
 pub type GameObjectID = usize;
+
 /// anything with this component should be moved with keyboard input
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InputComponent;
+
 /// this allows an object to move another object with this component
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MoveableComponent;
 /// this adds stats to an object to use it in combat
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StatsComponent {
     pub strength: usize,
     pub agility: usize,
@@ -38,6 +44,9 @@ impl StatsComponent {
     }
     pub fn heal(&mut self, amount: usize) {
         self.set_health(self.health + amount);
+    }
+    pub fn heal_to_max(&mut self) {
+        self.set_health(self.max_health);
     }
     pub fn set_health(&mut self, amount: usize) {
         self.health = amount.clamp(0, self.max_health);
@@ -128,6 +137,7 @@ pub struct Combat {
     pub projectile_spawn_time: usize,
     /// row of the player when the enemy attacks
     pub player_row: usize,
+    pub delete_when_defeated: bool, // maybe make this into a event so that we can destroy object after reading a dialogue?
 }
 
 impl Combat {
@@ -141,6 +151,7 @@ impl Combat {
         projectile_count: usize,
         projectile_move_time: usize,
         projectile_spawn_time: usize,
+        delete_when_defeated: bool,
     ) -> Self {
         Combat {
             current_selection: 0,
@@ -154,7 +165,8 @@ impl Combat {
             projectile_count,
             projectile_move_time,
             projectile_spawn_time,
-            player_row: 1
+            player_row: 1,
+            delete_when_defeated,
         }
     }
 }
@@ -164,6 +176,7 @@ pub enum GameEvent {
     Combat(Combat),
     TriggerObjectEvent(GameObjectID),
 }
+#[derive(Clone, Serialize, Deserialize)]
 pub enum EventCondition {
     None,
 }
@@ -174,6 +187,22 @@ pub struct EventStep {
     pub is_triggered: bool,
     /// if None it wont switch to any other event, if not will switch the event on that index (if it is a dialogue with selections that points to an event this value will not be used)
     pub next_event: Option<usize>,
+}
+impl EventStep {
+    pub fn new(
+        event: GameEvent,
+        requirement: EventCondition,
+        repeat: bool,
+        next_event: Option<usize>,
+    ) -> Self {
+        EventStep {
+            event,
+            requirement,
+            repeat,
+            is_triggered: false,
+            next_event,
+        }
+    }
 }
 pub struct EventComponent {
     pub events: Vec<EventStep>,

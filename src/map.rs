@@ -5,25 +5,27 @@ use std::collections::HashMap;
 
 pub struct Map {
     pub map_size: Vector2,
-    pub objects: Vec<GameObject>,
+    pub objects: HashMap<GameObjectID, GameObject>,
+    next_id: usize,
     pub positions_hashmap: HashMap<Vector2, GameObjectID>,
     pub ground_icon: ColoredString,
-    
+
     pub moveable_components: HashMap<GameObjectID, MoveableComponent>,
     pub input_components: HashMap<GameObjectID, InputComponent>,
     pub event_components: HashMap<GameObjectID, EventComponent>,
     pub stats_components: HashMap<GameObjectID, StatsComponent>,
-    
-    pub camera_operator: GameObjectID, // this fella is gonna control the camera
+
+    pub camera_operator: GameObjectID, // this fella is gonna control the camera a.k.a. the player
     pub current_event_id: Option<GameObjectID>,
 }
 impl Map {
-    pub fn new(_map_size: Vector2, _ground_icon: String, _ground_color: CustomColor) -> Self {
+    pub fn new(map_size: Vector2, ground_icon: ColoredString) -> Self {
         Self {
-            map_size: _map_size,
-            objects: Vec::new(),
+            map_size,
+            objects: HashMap::new(),
+            next_id: 0,
             positions_hashmap: HashMap::new(),
-            ground_icon: _ground_icon.custom_color(_ground_color),
+            ground_icon,
             moveable_components: HashMap::new(),
             input_components: HashMap::new(),
             event_components: HashMap::new(),
@@ -31,6 +33,18 @@ impl Map {
             camera_operator: 0,
             current_event_id: None,
         }
+    }
+
+    pub fn delete_object(&mut self, id: GameObjectID) {
+        let Some(object) = self.objects.get(&id) else {
+            return;
+        };
+        self.positions_hashmap.remove(&object.position);
+        self.objects.remove(&id);
+        self.moveable_components.remove(&id);
+        self.input_components.remove(&id);
+        self.event_components.remove(&id);
+        self.stats_components.remove(&id);
     }
 
     pub fn insert_object(
@@ -42,14 +56,14 @@ impl Map {
             println!("{} coordinate is already occupied!", position);
             return None;
         }
-        let object: GameObject = GameObject {
-            id: self.objects.len(),
-            icon,
-            position,
-        };
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let object: GameObject = GameObject { id, icon, position };
+
         self.positions_hashmap.insert(object.position, object.id);
-        self.objects.push(object);
-        return Some(self.objects.len() - 1);
+        self.objects.insert(id, object);
+        return Some(id);
     }
 
     pub fn insert_moveable_component(&mut self, id: GameObjectID) {
@@ -99,9 +113,12 @@ impl Map {
         if self.is_position_occupied(&new_position) || self.is_out_of_bounds(new_position) {
             return false;
         }
-        self.positions_hashmap.remove(&self.objects[id].position);
-        self.objects[id].position = new_position;
-        self.positions_hashmap.insert(self.objects[id].position, id);
+        let Some(object) = self.objects.get_mut(&id) else {
+            return false;
+        };
+        self.positions_hashmap.remove(&object.position);
+        object.position = new_position;
+        self.positions_hashmap.insert(new_position, id);
         return true;
     }
 

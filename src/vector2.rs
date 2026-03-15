@@ -1,7 +1,9 @@
 use std::fmt;
 use std::ops::{Add, Div};
 
-#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Vector2 {
     pub x: i32,
     pub y: i32,

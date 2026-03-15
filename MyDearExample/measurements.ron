@@ -1,0 +1,1 @@
+(screen_size:(x:50,y:20),screen_margins:(x:5,y:3),dialogue_padding:5,dialogue_text_padding:2,dialogue_selection_text_padding:2,dialogue_max_character_count:50,combat_character_padding_y:7,combat_character_padding_x:9,combat_characters_distance:30,combat_separator_padding_y:5,combat_selection_separator_padding:1,combat_health_padding_y:3)

@@ -11,7 +11,7 @@ use crate::game_object::{
     GameEvent, GameObjectID, Projectile, StatsComponent, TurnResult,
 };
 use crate::map::*;
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, ScreenMeasurements};
 use crate::vector2::*;
 
 use colored::control;
@@ -38,14 +38,13 @@ impl Game {
     pub fn new() -> Self {
         Game {
             map: Map::new(
-                Vector2::new(500, 500),
-                String::from("#"),
-                CustomColor::new(0, 255, 0),
+                Vector2::new(100, 100),
+                "#".custom_color(CustomColor::new(0, 255, 0)),
             ),
             camera: Vector2::zero(),
             audio_manager: generate_audio_manager().expect("Failed to initialize audio"),
             state: GameState::Normal,
-            renderer: Renderer::new(
+            renderer: Renderer::new(ScreenMeasurements::new(
                 Vector2::new(50, 20),
                 Vector2::new(5, 3),
                 5,
@@ -58,69 +57,135 @@ impl Game {
                 5,
                 1,
                 3,
-            ),
+            )),
         }
     }
 
     pub fn setup_objects(&mut self) {
         if let Some(id) = self.map.insert_object(
-            Vector2::new(6, 5),
+            Vector2::new(7, 6),
             "♥︎".custom_color(CustomColor::new(255, 0, 0)),
         ) {
             self.map.insert_input_component(id);
             self.map
-                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 1));
+                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 10));
             self.map.camera_operator = id;
         }
 
         if let Some(id) = self.map.insert_object(
-            Vector2::new(7, 3),
-            "1".custom_color(CustomColor::new(255, 255, 255)),
+            Vector2::new(9, 6),
+            "♥︎".custom_color(CustomColor::new(180, 0, 0)),
         ) {
-            self.map.insert_moveable_component(id);
+            self.map.insert_event_component(
+                id,
+                vec![
+                    EventStep::new(
+                        GameEvent::Dialogue(Dialogue {
+                            text: "The demon king and his demon army is back.".to_string(),
+                            selections: vec![],
+                            selections_pointing_event: vec![],
+                            current_selection: 0,
+                        }),
+                        EventCondition::None,
+                        true,
+                        Some(1),
+                    ),
+                    EventStep::new(
+                        GameEvent::Dialogue(Dialogue {
+                            text: "Go! The world need you to save us from the evil!".to_string(),
+                            selections: vec![],
+                            selections_pointing_event: vec![],
+                            current_selection: 0,
+                        }),
+                        EventCondition::None,
+                        true,
+                        None,
+                    ),
+                ],
+            );
         }
 
         if let Some(id) = self.map.insert_object(
-            Vector2::new(3, 3),
-            "♥︎".custom_color(CustomColor::new(180, 0, 0)),
+            Vector2::new(12, 4),
+            "♥︎".custom_color(CustomColor::new(255, 255, 0)),
         ) {
-            self.map
-                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 1));
-
-            let mut events: Vec<EventStep> = Vec::new();
-            events.push(EventStep {
-                event: GameEvent::Combat(Combat::new(
-                    CombatPhase::PlayerTurn,
+            self.map.insert_event_component(
+                id,
+                vec![EventStep::new(
+                    GameEvent::Dialogue(Dialogue {
+                        text: "I am so scared, ill pray and wish for you everyday brave knight."
+                            .to_string(),
+                        selections: vec![],
+                        selections_pointing_event: vec![],
+                        current_selection: 0,
+                    }),
+                    EventCondition::None,
                     true,
-                    false,
-                    1000,
-                    "#".custom_color(CustomColor::new(255, 255, 0)),
-                    5,
-                    5,
-                    100,
-                    300,
-                )),
-                requirement: EventCondition::None,
-                repeat: true,
-                is_triggered: false,
-                next_event: Some(1),
-            });
-            events.push(EventStep {
-                event: GameEvent::Dialogue(Dialogue {
-                    text: "You win the fight and this is a dialogue".to_string(),
-                    selections: vec![],
-                    selections_pointing_event: vec![],
-                    current_selection: 0,
-                }),
-                requirement: EventCondition::None,
-                repeat: true,
-                is_triggered: false,
-                next_event: None,
-            });
-            self.map.insert_event_component(id, events);
+                    None,
+                )],
+            );
+        }
+
+        if let Some(id) = self.map.insert_object(
+            Vector2::new(14, 4),
+            "♥︎".custom_color(CustomColor::new(0, 0, 255)),
+        ) {
+            self.map.insert_event_component(
+                id,
+                vec![EventStep::new(
+                    GameEvent::Dialogue(Dialogue {
+                        text: "I cannot understand demons, how can they be this evil? don't they feel bad when they try to sleep?."
+                            .to_string(),
+                        selections: vec![],
+                        selections_pointing_event: vec![],
+                        current_selection: 0,
+                    }),
+                    EventCondition::None,
+                    true,
+                    None,
+                )],
+            );
+        }
+
+        if let Some(id) = self.map.insert_object(
+            Vector2::new(12, 8),
+            "♥︎".custom_color(CustomColor::new(0, 255, 255)),
+        ) {
+            self.map.insert_event_component(
+                id,
+                vec![EventStep::new(
+                    GameEvent::Dialogue(Dialogue {
+                        text: "i believe in you, your victory is going to be glorious!".to_string(),
+                        selections: vec![],
+                        selections_pointing_event: vec![],
+                        current_selection: 0,
+                    }),
+                    EventCondition::None,
+                    true,
+                    None,
+                )],
+            );
+        }
+        if let Some(id) = self.map.insert_object(
+            Vector2::new(14, 8),
+            "♥︎".custom_color(CustomColor::new(255, 0, 255)),
+        ) {
+            self.map.insert_event_component(
+                id,
+                vec![EventStep::new(
+                    GameEvent::Dialogue(Dialogue {
+                        text: "I pray that one day demons would understand their wrongdoings and try to do the right things.".to_string(),
+                        selections: vec![],
+                        selections_pointing_event: vec![],
+                        current_selection: 0,
+                    }),
+                    EventCondition::None,
+                    true,
+                    None,
+                )],
+            );
         }
     }
-
     pub fn process_input(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::Char('q') {
             println!("Quitting... \r");
@@ -216,6 +281,9 @@ impl Game {
         let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Combat(ref mut combat) = event.events[event.current_index].event {
+            if !matches!(combat.current_phase, CombatPhase::PlayerTurn) {
+                return Some(());
+            }
             let player_stats = self.map.stats_components.get(&self.map.camera_operator)?;
             let enemy_stats = self.map.stats_components.get(&event_id)?;
             match COMBAT_SELECTIONS[combat.current_selection] {
@@ -256,12 +324,13 @@ impl Game {
 
         match event.events[event.current_index].requirement {
             EventCondition::None => 'none: {
-                match event.events[event.current_index].event {
-                    GameEvent::Dialogue(ref dialogue) => {
+                match &event.events[event.current_index].event {
+                    GameEvent::Dialogue(dialogue) => {
                         self.state = GameState::Normal;
                         if dialogue.selections_pointing_event.is_empty() {
                             let Some(next_index) = event.events[event.current_index].next_event
                             else {
+                                self.map.current_event_id = None;
                                 break 'none;
                             };
                             event.current_index = next_index;
@@ -274,6 +343,7 @@ impl Game {
                         else {
                             let Some(next_index) = event.events[event.current_index].next_event
                             else {
+                                self.map.current_event_id = None;
                                 break 'none;
                             };
                             event.current_index = next_index;
@@ -283,10 +353,17 @@ impl Game {
                         event.current_index = next_index;
                         self.trigger_event(event_id);
                     }
-                    GameEvent::Combat(_) => {
+                    GameEvent::Combat(combat) => {
+                        if combat.delete_when_defeated {
+                            self.map.delete_object(event_id);
+                            self.state = GameState::Normal;
+                            self.map.current_event_id = None;
+                            break 'none;
+                        }
                         let Some(next_index) = event.events[event.current_index].next_event else {
                             break 'none;
                         };
+                        self.map.stats_components.get_mut(&event_id)?.heal_to_max();
                         event.current_index = next_index;
                         self.trigger_event(event_id);
                     }
@@ -299,12 +376,12 @@ impl Game {
     }
 
     fn trigger_event_nearby(&mut self) -> Option<()> {
-        let id = self
-            .map
-            .get_event_around_this_position(self.map.objects[self.map.camera_operator].position)?;
-
+        let Some(camera_object) = self.map.objects.get(&self.map.camera_operator) else {
+            return None;
+        };
+        let pos = camera_object.position;
+        let id = self.map.get_event_around_this_position(pos)?;
         self.trigger_event(id);
-
         Some(())
     }
 
@@ -381,19 +458,22 @@ impl Game {
         let ids: Vec<usize> = self.map.input_components.keys().cloned().collect();
 
         for id in ids {
-            let next_position: Vector2 = self.map.objects[id].position + direction;
+            let Some(object) = self.map.objects.get(&id) else {
+                continue;
+            };
+            let next_position: Vector2 = object.position + direction;
 
             if self.map.is_out_of_bounds(next_position) {
                 continue;
             }
 
-            if let Some(moveable_id) = self.map.positions_hashmap.get(&next_position)
-                && self.map.moveable_components.contains_key(moveable_id)
+            if let Some(moveable_id) = self.map.positions_hashmap.get(&next_position).cloned()
+                && self.map.moveable_components.contains_key(&moveable_id)
             {
-                if self.map.change_object_position(
-                    *moveable_id,
-                    Vector2::new(direction.x, direction.y) + next_position,
-                ) {
+                if self
+                    .map
+                    .change_object_position(moveable_id, direction + next_position)
+                {
                     self.map.change_object_position(id, next_position);
                 }
             } else {
@@ -401,20 +481,29 @@ impl Game {
             }
         }
 
-        let rel_x = self.map.objects[self.map.camera_operator].position.x - self.camera.x;
-        if direction.x < 0 && rel_x < self.renderer.screen_margins.x {
+        let Some(camera_object) = self.map.objects.get(&self.map.camera_operator) else {
+            return;
+        };
+        let pos = camera_object.position;
+
+        let rel_x = pos.x - self.camera.x;
+        if direction.x < 0 && rel_x < self.renderer.measurements.screen_margins.x {
             self.camera.x += direction.x;
         } else if direction.x > 0
-            && rel_x >= self.renderer.screen_size.x - self.renderer.screen_margins.x
+            && rel_x
+                >= self.renderer.measurements.screen_size.x
+                    - self.renderer.measurements.screen_margins.x
         {
             self.camera.x += direction.x;
         }
 
-        let rel_y = self.map.objects[self.map.camera_operator].position.y - self.camera.y;
-        if direction.y < 0 && rel_y < self.renderer.screen_margins.y {
+        let rel_y = pos.y - self.camera.y;
+        if direction.y < 0 && rel_y < self.renderer.measurements.screen_margins.y {
             self.camera.y += direction.y;
         } else if direction.y > 0
-            && rel_y >= self.renderer.screen_size.y - self.renderer.screen_margins.y
+            && rel_y
+                >= self.renderer.measurements.screen_size.y
+                    - self.renderer.measurements.screen_margins.y
         {
             self.camera.y += direction.y;
         }
@@ -488,12 +577,13 @@ impl Game {
                             projectile.x += 1;
                         }
 
-                        let base = self.renderer.combat_character_padding_x
-                            + self.renderer.combat_characters_distance
+                        let base = self.renderer.measurements.combat_character_padding_x
+                            + self.renderer.measurements.combat_characters_distance
                             + 1;
                         enemy_attack.projectiles.retain(|projectile| {
                             if projectile.row == combat.player_row
-                                && projectile.x == self.renderer.combat_characters_distance + 1
+                                && projectile.x
+                                    == self.renderer.measurements.combat_characters_distance + 1
                             {
                                 enemy_attack.damage_dealt += projectile.damage;
                                 return false;
