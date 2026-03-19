@@ -93,11 +93,11 @@ impl Renderer {
                 file_selection,
                 file_input,
                 file_message,
+                recent_projects,
+                recent_selection,
             } => {
                 for y in 0..self.measurements.screen_size.y {
-                    let line_width = self.measurements.screen_size.x as usize;
-
-                    let line = match y as usize {
+                    let line: String = match y as usize {
                         2 => {
                             let mut s = String::new();
                             for (i, selection) in FILE_SELECTIONS.iter().enumerate() {
@@ -114,49 +114,67 @@ impl Renderer {
                             }
                             s
                         }
-                        4 => format!("location: {}", file_input),
+                        4 => {
+                            if FILE_SELECTIONS[*file_selection] == "Recent Projects" {
+                                format!("location: {}", file_input)
+                            } else {
+                                format!("location: {}", file_input)
+                            }
+                        }
                         5 => format!("{}", file_message),
-                        _ => String::new(),
-                    };
-
-                    let raw_len = match y as usize {
-                        2 => FILE_SELECTIONS.iter().map(|s| s.len() + 2).sum::<usize>(),
-                        4 => "location: ".len() + file_input.len(),
-                        5 => file_message.len(),
-                        _ => 0,
+                        _ => {
+                            let mut s = String::new();
+                            if FILE_SELECTIONS[*file_selection] == "Recent Projects" && y >= 4 {
+                                let list_index = y as usize - 6;
+                                if let Some(path) = recent_projects.get(list_index) {
+                                    if list_index == *recent_selection {
+                                        s = path
+                                            .custom_color(CustomColor::new(255, 0, 0))
+                                            .to_string()
+                                    } else {
+                                        s = path.clone()
+                                    }
+                                }
+                            }
+                            s
+                        }
                     };
 
                     buffer.push_str(&line);
-                    if raw_len < line_width {
-                        buffer.push_str(&" ".repeat(line_width - raw_len));
+                    if line.len() < self.measurements.screen_size.x as usize {
+                        buffer.push_str(
+                            &" ".repeat(self.measurements.screen_size.x as usize - line.len()),
+                        );
                     }
                     buffer.push_str("\r\n");
                 }
             }
             EditorState::EditingObject {
                 object_id,
+                selection,
                 edit_selection,
                 selected,
             } => {
                 for y in 0..self.measurements.screen_size.y {
-                    self.render_editor_map_line(&editor, &mut buffer, y);
+                    self.render_editor_map_line(editor, &mut buffer, y);
 
-                    buffer.push_str("  ");
-                    let line_index = y as usize;
-                    if line_index < OBJECT_EDIT_SELECTIONS.len() {
-                        let selection = OBJECT_EDIT_SELECTIONS[line_index];
-                        if line_index == *edit_selection {
-                            buffer.push_str(
-                                &selection
-                                    .custom_color(CustomColor::new(255, 0, 0))
-                                    .to_string(),
-                            );
+                    if (y as usize) < OBJECT_EDIT_SELECTIONS.len() {
+                        let selection_text = if y as usize == *selection {
+                            OBJECT_EDIT_SELECTIONS[y as usize]
+                                .custom_color(CustomColor::new(
+                                    if *selected { 255 } else { 127 },
+                                    0,
+                                    0,
+                                ))
+                                .to_string()
                         } else {
-                            buffer.push_str(selection);
-                        }
+                            OBJECT_EDIT_SELECTIONS[y as usize].to_string()
+                        };
+                        buffer.push_str("  ");
+                        buffer.push_str(&selection_text);
 
-                        if *selected {
-                            match selection {
+                        if *selected && y as usize == *selection {
+                            match OBJECT_EDIT_SELECTIONS[y as usize] {
                                 "Position" => {
                                     if let Some(object) = editor.map.objects.get(object_id) {
                                         buffer.push_str(
@@ -169,10 +187,52 @@ impl Renderer {
                                         );
                                     }
                                 }
+                                "Color" => {
+                                    if let Some(object) = editor.map.objects.get(object_id) {
+                                        let color = match object.icon.fgcolor {
+                                            Some(Color::TrueColor { r, g, b }) => {
+                                                CustomColor::new(r, g, b)
+                                            }
+                                            _ => CustomColor::new(255, 255, 255),
+                                        };
+
+                                        buffer.push_str("  ");
+
+                                        buffer.push_str(
+                                            &format!("r:{} ", color.r)
+                                                .custom_color(CustomColor::new(
+                                                    255,
+                                                    if *edit_selection == 0 { 255 } else { 127 },
+                                                    0,
+                                                ))
+                                                .to_string(),
+                                        );
+                                        buffer.push_str(
+                                            &format!("g:{} ", color.g)
+                                                .custom_color(CustomColor::new(
+                                                    255,
+                                                    if *edit_selection == 1 { 255 } else { 127 },
+                                                    0,
+                                                ))
+                                                .to_string(),
+                                        );
+                                        buffer.push_str(
+                                            &format!("b:{}", color.b)
+                                                .custom_color(CustomColor::new(
+                                                    255,
+                                                    if *edit_selection == 2 { 255 } else { 127 },
+                                                    0,
+                                                ))
+                                                .to_string(),
+                                        );
+                                    }
+                                }
                                 _ => {}
                             }
                         }
                     }
+
+                    buffer.push_str(&" ".repeat(25));
 
                     buffer.push_str("\r\n");
                 }
@@ -180,7 +240,7 @@ impl Renderer {
             _ => {
                 for y in 0..self.measurements.screen_size.y {
                     self.render_editor_map_line(&editor, &mut buffer, y);
-
+                    buffer.push_str(&" ".repeat(25)); // shi why not
                     buffer.push_str("\r\n");
                 }
             }

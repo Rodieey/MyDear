@@ -1,6 +1,9 @@
 use crate::{
     game_object::GameObjectID,
-    level::{data_to_map, load_map, load_measurements, map_to_data, save_map, save_measurements},
+    level::{
+        add_recent_project, data_to_map, load_map, load_measurements, load_recent_projects,
+        map_to_data, save_map, save_measurements,
+    },
     map::Map,
     renderer::{Renderer, ScreenMeasurements},
     vector2::Vector2,
@@ -18,19 +21,22 @@ use std::{
     path::Path,
 };
 
-pub const FILE_SELECTIONS: &[&str] = &["New Project", "Open Project"];
 pub const OBJECT_EDIT_SELECTIONS: &[&str] = &["Position", "Icon", "Color"];
+pub const FILE_SELECTIONS: &[&str] = &["New Project", "Open Project", "Recent Projects"];
 pub enum EditorState {
     SelectingFile {
         file_selection: usize,
         file_input: String,
         file_message: String,
+        recent_projects: Vec<String>,
+        recent_selection: usize,
     },
     Browsing {
         cursor: Vector2,
     },
     EditingObject {
         object_id: GameObjectID,
+        selection: usize,
         edit_selection: usize,
         selected: bool,
     },
@@ -69,6 +75,8 @@ impl Editor {
                 file_selection: 0,
                 file_input: "".to_string(),
                 file_message: "".to_string(),
+                recent_projects: load_recent_projects().paths,
+                recent_selection: 0,
             },
         }
     }
@@ -82,14 +90,31 @@ impl Editor {
                 file_selection,
                 file_input,
                 file_message,
+                recent_projects,
+                recent_selection,
             } => match key {
                 KeyCode::Left => {
-                    let new_index = (*file_selection as i32 - 1 + 2) % 2;
-                    *file_selection = new_index as usize;
+                    *file_selection =
+                        (*file_selection + FILE_SELECTIONS.len() - 1) % FILE_SELECTIONS.len();
                 }
                 KeyCode::Right => {
-                    let new_index = (*file_selection as i32 + 1 + 2) % 2;
-                    *file_selection = new_index as usize;
+                    *file_selection =
+                        (*file_selection + 1 + FILE_SELECTIONS.len()) % FILE_SELECTIONS.len();
+                }
+                KeyCode::Up => {
+                    if FILE_SELECTIONS[*file_selection] == "Recent Projects"
+                        && !recent_projects.is_empty()
+                    {
+                        *recent_selection =
+                            (*recent_selection + recent_projects.len() - 1) % recent_projects.len();
+                    }
+                }
+                KeyCode::Down => {
+                    if FILE_SELECTIONS[*file_selection] == "Recent Projects"
+                        && !recent_projects.is_empty()
+                    {
+                        *recent_selection = (*recent_selection + 1) % recent_projects.len();
+                    }
                 }
                 KeyCode::Char(c) => {
                     file_input.push(c);
@@ -109,6 +134,7 @@ impl Editor {
                                 let path_str = file_input.clone() + "/";
                                 let _ = save_map(&map_to_data(&self.map), path_str.clone());
                                 let _ = save_measurements(&self.renderer.measurements, path_str);
+                                add_recent_project(file_input);
                                 self.state = EditorState::Browsing {
                                     cursor: Vector2::new(
                                         self.renderer.measurements.screen_size.x / 2,
@@ -121,6 +147,7 @@ impl Editor {
                                 let path_str = file_input.clone() + "/";
                                 let _ = save_map(&map_to_data(&self.map), path_str.clone());
                                 let _ = save_measurements(&self.renderer.measurements, path_str);
+                                add_recent_project(file_input);
                                 self.state = EditorState::Browsing {
                                     cursor: Vector2::new(
                                         self.renderer.measurements.screen_size.x / 2,
@@ -137,6 +164,7 @@ impl Editor {
                             self.map = data_to_map(&load_map(&(path_str.clone() + "map.ron")));
                             self.renderer =
                                 Renderer::new(load_measurements(&(path_str + "measurements.ron")));
+                            add_recent_project(file_input);
                             self.state = EditorState::Browsing {
                                 cursor: Vector2::new(
                                     self.renderer.measurements.screen_size.x / 2,
@@ -145,6 +173,27 @@ impl Editor {
                             };
                         } else {
                             *file_message = format!("Filepath {} is not valid", file_input);
+                        }
+                    }
+                    "Recent Projects" => {
+                        if let Some(path) = recent_projects.get(*recent_selection) {
+                            let path_str = path.clone() + "/";
+                            let map_path = Path::new(path.as_str()).join("map.ron");
+                            if map_path.is_file() {
+                                self.map = data_to_map(&load_map(&(path_str.clone() + "map.ron")));
+                                self.renderer = Renderer::new(load_measurements(
+                                    &(path_str + "measurements.ron"),
+                                ));
+                                add_recent_project(path);
+                                self.state = EditorState::Browsing {
+                                    cursor: Vector2::new(
+                                        self.renderer.measurements.screen_size.x / 2,
+                                        self.renderer.measurements.screen_size.y / 2,
+                                    ),
+                                };
+                            } else {
+                                *file_message = format!("Project at {} no longer exists", path);
+                            }
                         }
                     }
                     _ => {}
@@ -162,6 +211,7 @@ impl Editor {
                     if let Some(object_id) = self.map.positions_hashmap.get(&current_pos) {
                         self.state = EditorState::EditingObject {
                             object_id: *object_id,
+                            selection: 0,
                             edit_selection: 0,
                             selected: false,
                         }
@@ -177,12 +227,13 @@ impl Editor {
             },
             EditorState::EditingObject {
                 object_id,
+                selection,
                 edit_selection,
                 selected,
             } => match key {
                 KeyCode::Up => {
                     if *selected {
-                        match OBJECT_EDIT_SELECTIONS[*edit_selection] {
+                        match OBJECT_EDIT_SELECTIONS[*selection] {
                             "Position" => {
                                 self.map.change_object_position(
                                     *object_id,
@@ -192,16 +243,30 @@ impl Editor {
                                     ),
                                 );
                             }
+                            "Color" => {
+                                if let Some(object) = self.map.objects.get_mut(object_id) {
+                                    if let Some(Color::TrueColor { r, g, b }) =
+                                        &mut object.icon.fgcolor
+                                    {
+                                        match *edit_selection {
+                                            0 => *r = r.wrapping_add(1),
+                                            1 => *g = g.wrapping_add(1),
+                                            2 => *b = b.wrapping_add(1),
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     } else {
-                        let new_index = (*edit_selection as i32 - 1).max(0) as usize;
-                        *edit_selection = new_index;
+                        *selection = (*selection + OBJECT_EDIT_SELECTIONS.len() - 1)
+                            % OBJECT_EDIT_SELECTIONS.len();
                     }
                 }
                 KeyCode::Down => {
                     if *selected {
-                        match OBJECT_EDIT_SELECTIONS[*edit_selection] {
+                        match OBJECT_EDIT_SELECTIONS[*selection] {
                             "Position" => {
                                 self.map.change_object_position(
                                     *object_id,
@@ -211,18 +276,29 @@ impl Editor {
                                     ),
                                 );
                             }
+                            "Color" => {
+                                if let Some(object) = self.map.objects.get_mut(object_id) {
+                                    if let Some(Color::TrueColor { r, g, b }) =
+                                        &mut object.icon.fgcolor
+                                    {
+                                        match *edit_selection {
+                                            0 => *r = r.wrapping_rem(1),
+                                            1 => *g = g.wrapping_rem(1),
+                                            2 => *b = b.wrapping_rem(1),
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     } else {
-                        let new_index = (*edit_selection as i32 + 1)
-                            .min(OBJECT_EDIT_SELECTIONS.len() as i32 - 1)
-                            as usize;
-                        *edit_selection = new_index;
+                        *selection = (*selection + 1) % OBJECT_EDIT_SELECTIONS.len();
                     }
                 }
                 KeyCode::Left => {
                     if *selected {
-                        match OBJECT_EDIT_SELECTIONS[*edit_selection] {
+                        match OBJECT_EDIT_SELECTIONS[*selection] {
                             "Position" => {
                                 self.map.change_object_position(
                                     *object_id,
@@ -232,13 +308,16 @@ impl Editor {
                                     ),
                                 );
                             }
+                            "Color" => {
+                                *edit_selection = (*edit_selection + 3 - 1) % 3;
+                            }
                             _ => {}
                         }
                     }
                 }
                 KeyCode::Right => {
                     if *selected {
-                        match OBJECT_EDIT_SELECTIONS[*edit_selection] {
+                        match OBJECT_EDIT_SELECTIONS[*selection] {
                             "Position" => {
                                 self.map.change_object_position(
                                     *object_id,
@@ -248,11 +327,17 @@ impl Editor {
                                     ),
                                 );
                             }
+                            "Color" => {
+                                *edit_selection = (*edit_selection + 1) % 3;
+                            }
                             _ => {}
                         }
                     }
                 }
-                KeyCode::Enter => *selected = !*selected,
+                KeyCode::Enter => {
+                    *selected = !*selected;
+                    *edit_selection = 0;
+                }
                 KeyCode::Delete => {}
                 KeyCode::Esc => {
                     self.state = EditorState::Browsing {
@@ -261,6 +346,18 @@ impl Editor {
                             self.renderer.measurements.screen_size.y / 2,
                         ),
                     };
+                }
+                KeyCode::Char(c) => {
+                    if *selected && OBJECT_EDIT_SELECTIONS[*selection] == "Icon" {
+                        if let Some(object) = self.map.objects.get_mut(object_id) {
+                            let color = object.icon.fgcolor.clone();
+                            object.icon = c.to_string().custom_color(match color {
+                                Some(Color::TrueColor { r, g, b }) => CustomColor::new(r, g, b),
+                                _ => CustomColor::new(255, 255, 255),
+                            });
+                            *selected = false;
+                        }
+                    }
                 }
                 _ => {}
             },

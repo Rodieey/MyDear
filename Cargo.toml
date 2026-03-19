@@ -9,6 +9,7 @@ editor = []
 [dependencies]
 colored = "3.1.1"
 crossterm = "0.27"
+directories = "6.0.0"
 kira = "0.11.0"
 rand = "0.10.0"
 ron = "0.12.0"

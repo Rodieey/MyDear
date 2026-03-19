@@ -1,10 +1,13 @@
 use crate::{
     game_object::{
-        EventCondition, GameEvent, GameObjectID, InputComponent, MoveableComponent,
-        StatsComponent,
-    }, map::Map, renderer::ScreenMeasurements, vector2::Vector2
+        EventCondition, GameEvent, GameObjectID, InputComponent, MoveableComponent, StatsComponent,
+    },
+    map::Map,
+    renderer::ScreenMeasurements,
+    vector2::Vector2,
 };
 use colored::*;
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
@@ -72,10 +75,50 @@ pub struct ColorData {
     pub g: u8,
     pub b: u8,
 }
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct RecentProjects {
+    pub paths: Vec<String>,
+}
+
+pub fn get_data_path() -> Option<std::path::PathBuf> {
+    ProjectDirs::from("com", "YourName", "MyDear").map(|dirs| {
+        let path = dirs.data_dir().to_path_buf();
+        std::fs::create_dir_all(&path).ok();
+        path
+    })
+}
+
+pub fn load_recent_projects() -> RecentProjects {
+    let Some(dir) = get_data_path() else {
+        return RecentProjects::default();
+    };
+    let path = dir.join("recent_projects.ron");
+    let Ok(s) = std::fs::read_to_string(path) else {
+        return RecentProjects::default();
+    };
+    ron::from_str(&s).unwrap_or_default()
+}
+
+pub fn save_recent_projects(data: &RecentProjects) -> std::io::Result<()> {
+    let Some(dir) = get_data_path() else {
+        return Ok(());
+    };
+    let s = ron::to_string(data).unwrap();
+    std::fs::write(dir.join("recent_projects.ron"), s)
+}
+
+pub fn add_recent_project(path: &str) -> RecentProjects {
+    let mut recent = load_recent_projects();
+    recent.paths.retain(|p| p != path);
+    recent.paths.insert(0, path.to_string());
+    let _ = save_recent_projects(&recent);
+    return recent;
+}
+
 fn data_to_color(data: &ColorData) -> CustomColor {
     CustomColor::new(data.r, data.g, data.b)
 }
-
 
 pub fn save_map(data: &MapData, path: String) -> std::io::Result<()> {
     let s = ron::to_string(data).unwrap();
