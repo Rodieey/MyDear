@@ -7,8 +7,8 @@ use std::io::{Write, stdout};
 use std::{i32, io};
 
 use crate::game_object::{
-    COMBAT_SELECTIONS, Combat, CombatPhase, Dialogue, EnemyAttack, EventCondition, EventStep,
-    GameEvent, GameObjectID, Projectile, StatsComponent, TurnResult,
+    COMBAT_SELECTIONS, CombatPhase, Dialogue, EnemyAttack, EventCondition, EventStep, GameEvent,
+    GameObjectID, Projectile, StatsComponent, TurnResult,
 };
 use crate::map::*;
 use crate::renderer::{Renderer, ScreenMeasurements};

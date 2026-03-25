@@ -1,13 +1,19 @@
 use colored::*;
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "editor"))]
 use crate::game::GameState;
+#[cfg(feature = "editor")]
+use crate::game_object::GameEvent;
+#[cfg(not(feature = "editor"))]
 use crate::game_object::{COMBAT_SELECTIONS, CombatPhase, GameEvent};
 use crate::map::Map;
 use crate::vector2::Vector2;
 
 #[cfg(feature = "editor")]
-use crate::editor::{Editor, EditorState, FILE_SELECTIONS, OBJECT_EDIT_SELECTIONS};
+use crate::editor::{
+    COMPONENT_SELECTIONS, Editor, EditorState, FILE_SELECTIONS, OBJECT_EDIT_SELECTIONS,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct ScreenMeasurements {
@@ -71,22 +77,45 @@ impl ScreenMeasurements {
 
 pub struct Renderer {
     pub measurements: ScreenMeasurements,
+    #[cfg(not(feature = "editor"))]
     pub combat_message: String,
+    #[cfg(feature = "editor")]
+    pub editor_message: String,
+    pub line_length: Vec<usize>,
 }
 
 impl Renderer {
     pub fn new(measurements: ScreenMeasurements) -> Self {
+        let y = measurements.screen_size.y as usize;
         Renderer {
             measurements,
+            #[cfg(not(feature = "editor"))]
             combat_message: String::from(""),
+            #[cfg(feature = "editor")]
+            editor_message: String::from(""),
+            line_length: vec![0; y + 1],
+        }
+    }
+
+    fn pad_line(&self, buffer: &mut String, y: usize, raw_len: usize) {
+        if raw_len < self.line_length[y] {
+            buffer.push_str(&" ".repeat(self.line_length[y] - raw_len));
+        } else if raw_len > self.line_length[y] {
+            buffer.push_str(&" ".repeat(raw_len - self.line_length[y]));
         }
     }
 
     #[cfg(feature = "editor")]
-    pub fn render_editor(&self, editor: &Editor) {
+    pub fn set_editor_message(&mut self, message: &str) {
+        self.editor_message = message.to_string();
+    }
+
+    #[cfg(feature = "editor")]
+    pub fn render_editor(&self, editor: &Editor) -> Vec<usize> {
         let mut buffer = String::with_capacity(
             (self.measurements.screen_size.x * self.measurements.screen_size.y * 15) as usize,
         );
+        let mut line_lengths = vec![0; (self.measurements.screen_size.y + 1) as usize];
 
         match &editor.state {
             EditorState::SelectingFile {
@@ -97,9 +126,10 @@ impl Renderer {
                 recent_selection,
             } => {
                 for y in 0..self.measurements.screen_size.y {
-                    let line: String = match y as usize {
+                    let (line, raw_len): (String, usize) = match y as usize {
                         2 => {
                             let mut s = String::new();
+                            let mut len = 0;
                             for (i, selection) in FILE_SELECTIONS.iter().enumerate() {
                                 if i == *file_selection {
                                     s.push_str(
@@ -111,41 +141,53 @@ impl Renderer {
                                     s.push_str(selection);
                                 }
                                 s.push_str("  ");
+                                len += selection.len() + 2;
                             }
-                            s
+                            (s, len)
                         }
                         4 => {
                             if FILE_SELECTIONS[*file_selection] == "Recent Projects" {
-                                format!("location: {}", file_input)
+                                (String::new(), 0)
                             } else {
-                                format!("location: {}", file_input)
+                                let text = format!("location: {}", file_input);
+                                let len = "location: ".len() + file_input.len();
+                                (text, len)
                             }
                         }
-                        5 => format!("{}", file_message),
+                        5 => {
+                            if FILE_SELECTIONS[*file_selection] != "Recent Projects" {
+                                let len = file_message.len();
+                                (file_message.clone(), len)
+                            } else {
+                                (String::new(), 0)
+                            }
+                        }
                         _ => {
-                            let mut s = String::new();
                             if FILE_SELECTIONS[*file_selection] == "Recent Projects" && y >= 4 {
                                 let list_index = y as usize - 6;
                                 if let Some(path) = recent_projects.get(list_index) {
+                                    let len = path.len();
                                     if list_index == *recent_selection {
-                                        s = path
-                                            .custom_color(CustomColor::new(255, 0, 0))
-                                            .to_string()
+                                        (
+                                            path.custom_color(CustomColor::new(255, 0, 0))
+                                                .to_string(),
+                                            len,
+                                        )
                                     } else {
-                                        s = path.clone()
+                                        (path.clone(), len)
                                     }
+                                } else {
+                                    (String::new(), 0)
                                 }
+                            } else {
+                                (String::new(), 0)
                             }
-                            s
                         }
                     };
 
                     buffer.push_str(&line);
-                    if line.len() < self.measurements.screen_size.x as usize {
-                        buffer.push_str(
-                            &" ".repeat(self.measurements.screen_size.x as usize - line.len()),
-                        );
-                    }
+                    self.pad_line(&mut buffer, y as usize, raw_len);
+                    line_lengths.push(raw_len);
                     buffer.push_str("\r\n");
                 }
             }
@@ -157,10 +199,12 @@ impl Renderer {
             } => {
                 for y in 0..self.measurements.screen_size.y {
                     self.render_editor_map_line(editor, &mut buffer, y);
+                    let mut raw_len = self.measurements.screen_size.x as usize;
 
                     if (y as usize) < OBJECT_EDIT_SELECTIONS.len() {
+                        let sel_str = OBJECT_EDIT_SELECTIONS[y as usize];
                         let selection_text = if y as usize == *selection {
-                            OBJECT_EDIT_SELECTIONS[y as usize]
+                            sel_str
                                 .custom_color(CustomColor::new(
                                     if *selected { 255 } else { 127 },
                                     0,
@@ -168,22 +212,25 @@ impl Renderer {
                                 ))
                                 .to_string()
                         } else {
-                            OBJECT_EDIT_SELECTIONS[y as usize].to_string()
+                            sel_str.to_string()
                         };
                         buffer.push_str("  ");
                         buffer.push_str(&selection_text);
+                        raw_len += 2 + sel_str.len();
 
                         if *selected && y as usize == *selection {
-                            match OBJECT_EDIT_SELECTIONS[y as usize] {
+                            match sel_str {
                                 "Position" => {
                                     if let Some(object) = editor.map.objects.get(object_id) {
+                                        let pos_text = format!(
+                                            "  x:{} y:{}",
+                                            object.position.x, object.position.y
+                                        );
+                                        raw_len += pos_text.len();
                                         buffer.push_str(
-                                            &format!(
-                                                "  x:{} y:{}",
-                                                object.position.x, object.position.y
-                                            )
-                                            .custom_color(CustomColor::new(255, 255, 0))
-                                            .to_string(),
+                                            &pos_text
+                                                .custom_color(CustomColor::new(255, 255, 0))
+                                                .to_string(),
                                         );
                                     }
                                 }
@@ -196,10 +243,13 @@ impl Renderer {
                                             _ => CustomColor::new(255, 255, 255),
                                         };
 
-                                        buffer.push_str("  ");
+                                        let r_text = format!("  r:{} ", color.r);
+                                        let g_text = format!("g:{} ", color.g);
+                                        let b_text = format!("b:{}", color.b);
+                                        raw_len += r_text.len() + g_text.len() + b_text.len();
 
                                         buffer.push_str(
-                                            &format!("r:{} ", color.r)
+                                            &r_text
                                                 .custom_color(CustomColor::new(
                                                     255,
                                                     if *edit_selection == 0 { 255 } else { 127 },
@@ -208,7 +258,7 @@ impl Renderer {
                                                 .to_string(),
                                         );
                                         buffer.push_str(
-                                            &format!("g:{} ", color.g)
+                                            &g_text
                                                 .custom_color(CustomColor::new(
                                                     255,
                                                     if *edit_selection == 1 { 255 } else { 127 },
@@ -217,7 +267,7 @@ impl Renderer {
                                                 .to_string(),
                                         );
                                         buffer.push_str(
-                                            &format!("b:{}", color.b)
+                                            &b_text
                                                 .custom_color(CustomColor::new(
                                                     255,
                                                     if *edit_selection == 2 { 255 } else { 127 },
@@ -232,21 +282,71 @@ impl Renderer {
                         }
                     }
 
-                    buffer.push_str(&" ".repeat(25));
+                    self.pad_line(&mut buffer, y as usize, raw_len);
+                    line_lengths.push(raw_len);
+                    buffer.push_str("\r\n");
+                }
+            }
+            EditorState::SelectingComponent {
+                object_id,
+                selection,
+                selected,
+            } => {
+                for y in 0..self.measurements.screen_size.y {
+                    self.render_editor_map_line(editor, &mut buffer, y);
+                    let mut raw_len = self.measurements.screen_size.x as usize;
 
+                    if (y as usize) < COMPONENT_SELECTIONS.len() {
+                        let sel_str = COMPONENT_SELECTIONS[y as usize];
+                        let selection_text = if y as usize == *selection {
+                            sel_str
+                                .custom_color(CustomColor::new(
+                                    if *selected { 255 } else { 127 },
+                                    0,
+                                    0,
+                                ))
+                                .to_string()
+                        } else {
+                            sel_str.to_string()
+                        };
+                        buffer.push_str("  ");
+                        buffer.push_str(&selection_text);
+                        raw_len += 2 + sel_str.len();
+
+                        if *selected && y as usize == *selection {
+                            match sel_str {
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    self.pad_line(&mut buffer, y as usize, raw_len);
+                    line_lengths.push(raw_len);
                     buffer.push_str("\r\n");
                 }
             }
             _ => {
                 for y in 0..self.measurements.screen_size.y {
-                    self.render_editor_map_line(&editor, &mut buffer, y);
-                    buffer.push_str(&" ".repeat(25)); // shi why not
+                    self.render_editor_map_line(editor, &mut buffer, y);
+                    let raw_len = self.measurements.screen_size.x as usize;
+                    self.pad_line(&mut buffer, y as usize, raw_len);
+                    line_lengths.push(raw_len);
                     buffer.push_str("\r\n");
                 }
             }
         }
+
+        buffer.push_str(&self.editor_message);
+        self.pad_line(
+            &mut buffer,
+            (self.measurements.screen_size.y) as usize,
+            self.editor_message.len(),
+        );
+        line_lengths.push(self.editor_message.len());
         print!("{}", buffer);
+        return line_lengths;
     }
+
     #[cfg(feature = "editor")]
     fn render_editor_map_line(&self, editor: &Editor, buffer: &mut String, y: i32) {
         let cursor_screen_pos = if let EditorState::Browsing { cursor } = &editor.state {
@@ -274,6 +374,7 @@ impl Renderer {
         }
     }
 
+    #[cfg(not(feature = "editor"))]
     pub fn render(&self, map: &Map, camera: &Vector2, state: &GameState) {
         let Some(cam) = map.objects.get(&map.camera_operator) else {
             return;
@@ -383,6 +484,7 @@ impl Renderer {
         return None;
     }
 
+    #[cfg(not(feature = "editor"))]
     fn render_combat_line(&self, map: &Map, buffer: &mut String, y: i32) {
         let Some(event_id) = map.current_event_id else {
             return;

@@ -15,14 +15,25 @@ use crossterm::{
     execute,
     terminal::{self, disable_raw_mode, enable_raw_mode},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     io::{self, Write, stdout},
     path::Path,
 };
 
-pub const OBJECT_EDIT_SELECTIONS: &[&str] = &["Position", "Icon", "Color"];
+pub const OBJECT_EDIT_SELECTIONS: &[&str] = &["Position", "Icon", "Color", "Components"];
 pub const FILE_SELECTIONS: &[&str] = &["New Project", "Open Project", "Recent Projects"];
+pub const COMPONENT_SELECTIONS: &[&str] = &[
+    "MoveableComponent",
+    "InputComponent",
+    "EventComponent",
+    "StatsComponent",
+];
+
+pub const BROSWING_MESSAGE: &str = "←↑→↓:Move, e:Insert/Edit object, s:Save, q:Quit";
+pub const EDITING_OBJECT_MESSAGE: &str =
+    "↑↓:Move selection, ENTER:Select/DeSelect property, ESC:Go back";
+
 pub enum EditorState {
     SelectingFile {
         file_selection: usize,
@@ -40,6 +51,11 @@ pub enum EditorState {
         edit_selection: usize,
         selected: bool,
     },
+    SelectingComponent {
+        object_id: GameObjectID,
+        selection: usize,
+        selected: bool,
+    },
 }
 
 pub struct Editor {
@@ -47,6 +63,8 @@ pub struct Editor {
     pub camera: Vector2,
     pub renderer: Renderer,
     pub state: EditorState,
+    current_folder: String,
+    current_map: String,
 }
 
 impl Editor {
@@ -78,28 +96,136 @@ impl Editor {
                 recent_projects: load_recent_projects().paths,
                 recent_selection: 0,
             },
+            current_folder: "".to_string(),
+            current_map: "".to_string(),
         }
+    }
+
+    fn save(&self) {
+        let _ = save_map(
+            &map_to_data(&self.map),
+            &self.current_folder,
+            &self.current_map,
+        );
+        let _ = save_measurements(&self.renderer.measurements, &self.current_folder);
+    }
+
+    fn open_project(&mut self, path: &str) -> bool {
+        let folder = if path.ends_with('/') {
+            path.to_string()
+        } else {
+            path.to_string() + "/"
+        };
+
+        let map_path = folder.clone() + "map.ron";
+        let measurements_path = folder.clone() + "measurements.ron";
+
+        if !Path::new(&map_path).is_file() {
+            return false;
+        }
+        if !Path::new(&measurements_path).is_file() {
+            return false;
+        }
+
+        self.map = data_to_map(&load_map(&map_path));
+        self.renderer = Renderer::new(load_measurements(&measurements_path));
+        self.current_folder = folder;
+        self.current_map = String::from("map.ron");
+        add_recent_project(path);
+        self.renderer.set_editor_message(BROSWING_MESSAGE);
+        self.state = EditorState::Browsing {
+            cursor: Vector2::new(
+                self.renderer.measurements.screen_size.x / 2,
+                self.renderer.measurements.screen_size.y / 2,
+            ),
+        };
+        return true;
     }
 
     pub fn process_input(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::Char('q') {
             return false;
         }
+        if let EditorState::SelectingFile {
+            file_selection,
+            file_input,
+            recent_projects,
+            recent_selection,
+            ..
+        } = &self.state
+        {
+            if key == KeyCode::Enter {
+                let selection = FILE_SELECTIONS[*file_selection];
+                let input = file_input.clone();
+                let recent = recent_projects.get(*recent_selection).cloned();
+                // all borrows of self.state dropped here
+                match selection {
+                    "New Project" => {
+                        let path = Path::new(input.as_str());
+                        let can_create = if path.exists() {
+                            path.read_dir()
+                                .map(|mut d| d.next().is_none())
+                                .unwrap_or(false)
+                        } else {
+                            std::fs::create_dir_all(path).is_ok()
+                        };
+                        if can_create {
+                            self.current_folder = input.clone() + "/";
+                            add_recent_project(&input);
+                            self.save();
+                            self.renderer.set_editor_message(BROSWING_MESSAGE);
+                            self.state = EditorState::Browsing {
+                                cursor: Vector2::new(
+                                    self.renderer.measurements.screen_size.x / 2,
+                                    self.renderer.measurements.screen_size.y / 2,
+                                ),
+                            };
+                        } else {
+                            if let EditorState::SelectingFile { file_message, .. } = &mut self.state
+                            {
+                                *file_message = format!("Cannot create project at {}", input);
+                            }
+                        }
+                    }
+                    "Open Project" => {
+                        if !self.open_project(&input) {
+                            if let EditorState::SelectingFile { file_message, .. } = &mut self.state
+                            {
+                                *file_message = format!("Filepath {} is not valid", input);
+                            }
+                        }
+                    }
+                    "Recent Projects" => {
+                        if let Some(path) = recent {
+                            if !self.open_project(&path) {
+                                if let EditorState::SelectingFile { file_message, .. } =
+                                    &mut self.state
+                                {
+                                    *file_message = format!("Project at {} no longer exists", path);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return true;
+            }
+        }
+
         match &mut self.state {
             EditorState::SelectingFile {
                 file_selection,
                 file_input,
-                file_message,
                 recent_projects,
                 recent_selection,
+                ..
             } => match key {
                 KeyCode::Left => {
                     *file_selection =
                         (*file_selection + FILE_SELECTIONS.len() - 1) % FILE_SELECTIONS.len();
                 }
                 KeyCode::Right => {
-                    *file_selection =
-                        (*file_selection + 1 + FILE_SELECTIONS.len()) % FILE_SELECTIONS.len();
+                    *file_selection = (*file_selection + 1) % FILE_SELECTIONS.len();
                 }
                 KeyCode::Up => {
                     if FILE_SELECTIONS[*file_selection] == "Recent Projects"
@@ -117,87 +243,15 @@ impl Editor {
                     }
                 }
                 KeyCode::Char(c) => {
-                    file_input.push(c);
+                    if FILE_SELECTIONS[*file_selection] != "Recent Projects" {
+                        file_input.push(c);
+                    }
                 }
                 KeyCode::Backspace => {
-                    file_input.pop();
+                    if FILE_SELECTIONS[*file_selection] != "Recent Projects" {
+                        file_input.pop();
+                    }
                 }
-                KeyCode::Enter => match FILE_SELECTIONS[*file_selection] {
-                    "New Project" => {
-                        let path = Path::new(file_input.as_str());
-                        if path.exists() {
-                            let is_empty = path
-                                .read_dir()
-                                .map(|mut d| d.next().is_none())
-                                .unwrap_or(false);
-                            if is_empty {
-                                let path_str = file_input.clone() + "/";
-                                let _ = save_map(&map_to_data(&self.map), path_str.clone());
-                                let _ = save_measurements(&self.renderer.measurements, path_str);
-                                add_recent_project(file_input);
-                                self.state = EditorState::Browsing {
-                                    cursor: Vector2::new(
-                                        self.renderer.measurements.screen_size.x / 2,
-                                        self.renderer.measurements.screen_size.y / 2,
-                                    ),
-                                };
-                            }
-                        } else {
-                            if std::fs::create_dir_all(path).is_ok() {
-                                let path_str = file_input.clone() + "/";
-                                let _ = save_map(&map_to_data(&self.map), path_str.clone());
-                                let _ = save_measurements(&self.renderer.measurements, path_str);
-                                add_recent_project(file_input);
-                                self.state = EditorState::Browsing {
-                                    cursor: Vector2::new(
-                                        self.renderer.measurements.screen_size.x / 2,
-                                        self.renderer.measurements.screen_size.y / 2,
-                                    ),
-                                };
-                            }
-                        }
-                    }
-                    "Open Project" => {
-                        let path_str = file_input.clone() + "/";
-                        let map_path = Path::new(file_input.as_str()).join("map.ron");
-                        if map_path.is_file() {
-                            self.map = data_to_map(&load_map(&(path_str.clone() + "map.ron")));
-                            self.renderer =
-                                Renderer::new(load_measurements(&(path_str + "measurements.ron")));
-                            add_recent_project(file_input);
-                            self.state = EditorState::Browsing {
-                                cursor: Vector2::new(
-                                    self.renderer.measurements.screen_size.x / 2,
-                                    self.renderer.measurements.screen_size.y / 2,
-                                ),
-                            };
-                        } else {
-                            *file_message = format!("Filepath {} is not valid", file_input);
-                        }
-                    }
-                    "Recent Projects" => {
-                        if let Some(path) = recent_projects.get(*recent_selection) {
-                            let path_str = path.clone() + "/";
-                            let map_path = Path::new(path.as_str()).join("map.ron");
-                            if map_path.is_file() {
-                                self.map = data_to_map(&load_map(&(path_str.clone() + "map.ron")));
-                                self.renderer = Renderer::new(load_measurements(
-                                    &(path_str + "measurements.ron"),
-                                ));
-                                add_recent_project(path);
-                                self.state = EditorState::Browsing {
-                                    cursor: Vector2::new(
-                                        self.renderer.measurements.screen_size.x / 2,
-                                        self.renderer.measurements.screen_size.y / 2,
-                                    ),
-                                };
-                            } else {
-                                *file_message = format!("Project at {} no longer exists", path);
-                            }
-                        }
-                    }
-                    _ => {}
-                },
                 _ => {}
             },
             EditorState::Browsing { cursor } => match key {
@@ -209,6 +263,7 @@ impl Editor {
                 KeyCode::Char('e') => {
                     let current_pos = self.camera + *cursor;
                     if let Some(object_id) = self.map.positions_hashmap.get(&current_pos) {
+                        self.renderer.set_editor_message(EDITING_OBJECT_MESSAGE);
                         self.state = EditorState::EditingObject {
                             object_id: *object_id,
                             selection: 0,
@@ -222,7 +277,9 @@ impl Editor {
                         );
                     }
                 }
-                KeyCode::Char('s') => {}
+                KeyCode::Char('s') => {
+                    self.save();
+                }
                 _ => {}
             },
             EditorState::EditingObject {
@@ -282,9 +339,9 @@ impl Editor {
                                         &mut object.icon.fgcolor
                                     {
                                         match *edit_selection {
-                                            0 => *r = r.wrapping_rem(1),
-                                            1 => *g = g.wrapping_rem(1),
-                                            2 => *b = b.wrapping_rem(1),
+                                            0 => *r = r.wrapping_sub(1),
+                                            1 => *g = g.wrapping_sub(1),
+                                            2 => *b = b.wrapping_sub(1),
                                             _ => {}
                                         }
                                     }
@@ -337,9 +394,17 @@ impl Editor {
                 KeyCode::Enter => {
                     *selected = !*selected;
                     *edit_selection = 0;
+                    if OBJECT_EDIT_SELECTIONS[*selection] == "Components" {
+                        self.state = EditorState::SelectingComponent {
+                            object_id: object_id.clone(),
+                            selection: 0,
+                            selected: false,
+                        }
+                    }
                 }
                 KeyCode::Delete => {}
                 KeyCode::Esc => {
+                    self.renderer.set_editor_message(BROSWING_MESSAGE);
                     self.state = EditorState::Browsing {
                         cursor: Vector2::new(
                             self.renderer.measurements.screen_size.x / 2,
@@ -361,7 +426,28 @@ impl Editor {
                 }
                 _ => {}
             },
-            _ => {}
+            EditorState::SelectingComponent {
+                object_id,
+                selection,
+                selected,
+            } => match key {
+                KeyCode::Up => {
+                    *selection =
+                        (*selection + COMPONENT_SELECTIONS.len() - 1) % COMPONENT_SELECTIONS.len();
+                }
+                KeyCode::Down => {
+                    *selection = (*selection + 1) % COMPONENT_SELECTIONS.len();
+                }
+                KeyCode::Esc => {
+                    self.state = EditorState::EditingObject {
+                        object_id: object_id.clone(),
+                        selection: 3,
+                        edit_selection: 0,
+                        selected: false,
+                    }
+                }
+                _ => {}
+            },
         }
         return true;
     }
@@ -382,7 +468,7 @@ pub fn run() -> io::Result<()> {
 
         execute!(stdout, cursor::MoveTo(0, 0))?;
 
-        editor.renderer.render_editor(&editor);
+        editor.renderer.line_length = editor.renderer.render_editor(&editor);
 
         stdout.flush()?;
 

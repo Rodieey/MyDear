@@ -120,14 +120,14 @@ fn data_to_color(data: &ColorData) -> CustomColor {
     CustomColor::new(data.r, data.g, data.b)
 }
 
-pub fn save_map(data: &MapData, path: String) -> std::io::Result<()> {
+pub fn save_map(data: &MapData, path: &str, map_name: &str) -> std::io::Result<()> {
     let s = ron::to_string(data).unwrap();
-    std::fs::write(Path::new(&path).join("map.ron"), s)
+    std::fs::write(Path::new(path).join(map_name), s)
 }
 
-pub fn save_measurements(data: &ScreenMeasurements, path: String) -> std::io::Result<()> {
+pub fn save_measurements(data: &ScreenMeasurements, path: &str) -> std::io::Result<()> {
     let s = ron::to_string(data).unwrap();
-    std::fs::write(Path::new(&path).join("measurements.ron"), s)
+    std::fs::write(Path::new(path).join("measurements.ron"), s)
 }
 pub fn load_map(path: &str) -> MapData {
     let s = std::fs::read_to_string(path).unwrap();

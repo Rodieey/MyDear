@@ -1,11 +1,17 @@
-mod game;
-mod game_object;
-mod map;
-mod vector2;
-mod renderer;
-mod level;
+#![allow(unused_variables)]
+#![allow(dead_code)]
+#![warn(unused_imports)]
+
 #[cfg(feature = "editor")]
 mod editor;
+#[cfg(not(feature = "editor"))]
+mod game;
+mod game_object;
+#[cfg(feature = "editor")]
+mod level;
+mod map;
+mod renderer;
+mod vector2;
 
 fn main() {
     #[cfg(feature = "editor")]

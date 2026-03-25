@@ -1,1 +1,1 @@
-(map_size:(x:500,y:500),objects:{},ground_icon:"#",ground_color:(r:0,g:255,b:0),moveable_components:{},input_components:{},event_components:{},stats_components:{},camera_operator:0)
+(map_size:(x:500,y:500),objects:{0:(position:(x:24,y:9),icon:"♥\u{fe0e}",icon_color:(r:255,g:0,b:0))},ground_icon:"#",ground_color:(r:0,g:255,b:0),moveable_components:{},input_components:{},event_components:{},stats_components:{},camera_operator:0)
