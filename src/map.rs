@@ -91,7 +91,7 @@ impl Map {
         id: GameObjectID,
     ) {
         if component_hashmap.contains_key(&id) {
-            println!("Gameobject with {} id already has Moveable Component", id);
+            //println!("Gameobject with {} id already has that Component", id);
             return;
         }
 

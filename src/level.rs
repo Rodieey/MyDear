@@ -116,6 +116,13 @@ pub fn add_recent_project(path: &str) -> RecentProjects {
     return recent;
 }
 
+pub fn remove_recent_project(path: &str) -> RecentProjects {
+    let mut recent = load_recent_projects();
+    recent.paths.retain(|p| p != path);
+    let _ = save_recent_projects(&recent);
+    return recent;
+}
+
 fn data_to_color(data: &ColorData) -> CustomColor {
     CustomColor::new(data.r, data.g, data.b)
 }

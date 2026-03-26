@@ -1,8 +1,8 @@
 use crate::{
-    game_object::GameObjectID,
+    game_object::{GameObjectID, StatsComponent},
     level::{
         add_recent_project, data_to_map, load_map, load_measurements, load_recent_projects,
-        map_to_data, save_map, save_measurements,
+        map_to_data, remove_recent_project, save_map, save_measurements,
     },
     map::Map,
     renderer::{Renderer, ScreenMeasurements},
@@ -29,10 +29,15 @@ pub const COMPONENT_SELECTIONS: &[&str] = &[
     "EventComponent",
     "StatsComponent",
 ];
+pub const STATS_COMPONENT_SELECTIONS: &[&str] =
+    &["strength", "agility", "defense", "luck", "max_health"];
 
 pub const BROSWING_MESSAGE: &str = "←↑→↓:Move, e:Insert/Edit object, s:Save, q:Quit";
 pub const EDITING_OBJECT_MESSAGE: &str =
-    "↑↓:Move selection, ENTER:Select/DeSelect property, ESC:Go back";
+    "↑↓:Move selection, ENTER:Select/DeSelect property, DELETE:Delete Object, ESC:Go back";
+pub const EDITING_COMPONENT_MESSAGE: &str =
+    "↑↓:Move selection, ENTER:Add component, DELETE:Remove component, ESC:Go back";
+pub const EDITING_STATS_COMPONENT_MESSAGE: &str = "↑↓:Move selection, ←→:Change value, ESC:Go back";
 
 pub enum EditorState {
     SelectingFile {
@@ -54,7 +59,14 @@ pub enum EditorState {
     SelectingComponent {
         object_id: GameObjectID,
         selection: usize,
-        selected: bool,
+    },
+    EditingEventComponent {
+        object_id: GameObjectID,
+        selection: usize,
+    },
+    EditingStatsComponent {
+        object_id: GameObjectID,
+        selection: usize,
     },
 }
 
@@ -155,6 +167,9 @@ impl Editor {
         } = &self.state
         {
             if key == KeyCode::Enter {
+                if file_input == "" && FILE_SELECTIONS[*file_selection] != "Recent Projects" {
+                    return true;
+                }
                 let selection = FILE_SELECTIONS[*file_selection];
                 let input = file_input.clone();
                 let recent = recent_projects.get(*recent_selection).cloned();
@@ -216,9 +231,9 @@ impl Editor {
             EditorState::SelectingFile {
                 file_selection,
                 file_input,
+                file_message,
                 recent_projects,
                 recent_selection,
-                ..
             } => match key {
                 KeyCode::Left => {
                     *file_selection =
@@ -250,6 +265,20 @@ impl Editor {
                 KeyCode::Backspace => {
                     if FILE_SELECTIONS[*file_selection] != "Recent Projects" {
                         file_input.pop();
+                    }
+                }
+                KeyCode::Delete => {
+                    if FILE_SELECTIONS[*file_selection] == "Recent Projects"
+                        && !recent_projects.is_empty()
+                    {
+                        remove_recent_project(&recent_projects[*recent_selection]);
+                        self.state = EditorState::SelectingFile {
+                            file_selection: *file_selection,
+                            file_input: file_input.clone(),
+                            file_message: file_message.clone(),
+                            recent_projects: load_recent_projects().paths,
+                            recent_selection: *recent_selection,
+                        };
                     }
                 }
                 _ => {}
@@ -395,14 +424,23 @@ impl Editor {
                     *selected = !*selected;
                     *edit_selection = 0;
                     if OBJECT_EDIT_SELECTIONS[*selection] == "Components" {
+                        self.renderer.set_editor_message(EDITING_COMPONENT_MESSAGE);
                         self.state = EditorState::SelectingComponent {
                             object_id: object_id.clone(),
                             selection: 0,
-                            selected: false,
                         }
                     }
                 }
-                KeyCode::Delete => {}
+                KeyCode::Delete => {
+                    self.map.delete_object(*object_id);
+                    self.renderer.set_editor_message(BROSWING_MESSAGE);
+                    self.state = EditorState::Browsing {
+                        cursor: Vector2::new(
+                            self.renderer.measurements.screen_size.x / 2,
+                            self.renderer.measurements.screen_size.y / 2,
+                        ),
+                    };
+                }
                 KeyCode::Esc => {
                     self.renderer.set_editor_message(BROSWING_MESSAGE);
                     self.state = EditorState::Browsing {
@@ -429,7 +467,6 @@ impl Editor {
             EditorState::SelectingComponent {
                 object_id,
                 selection,
-                selected,
             } => match key {
                 KeyCode::Up => {
                     *selection =
@@ -438,12 +475,126 @@ impl Editor {
                 KeyCode::Down => {
                     *selection = (*selection + 1) % COMPONENT_SELECTIONS.len();
                 }
+                KeyCode::Enter => match COMPONENT_SELECTIONS[*selection] {
+                    "MoveableComponent" => {
+                        self.map.insert_moveable_component(*object_id);
+                    }
+                    "InputComponent" => {
+                        self.map.insert_input_component(*object_id);
+                    }
+                    "StatsComponent" => {
+                        self.map
+                            .insert_stats_component(*object_id, StatsComponent::new(0, 0, 0, 0, 0));
+                        self.renderer
+                            .set_editor_message(EDITING_STATS_COMPONENT_MESSAGE);
+                        self.state = EditorState::EditingStatsComponent {
+                            object_id: *object_id,
+                            selection: 0,
+                        }
+                    }
+                    _ => {}
+                },
+                KeyCode::Delete => match COMPONENT_SELECTIONS[*selection] {
+                    "MoveableComponent" => {
+                        self.map.moveable_components.remove(object_id);
+                    }
+                    "InputComponent" => {
+                        self.map.input_components.remove(object_id);
+                    }
+                    "StatsComponent" => {
+                        self.map.stats_components.remove(object_id);
+                    }
+                    _ => {}
+                },
                 KeyCode::Esc => {
+                    self.renderer.set_editor_message(EDITING_OBJECT_MESSAGE);
                     self.state = EditorState::EditingObject {
-                        object_id: object_id.clone(),
+                        object_id: *object_id,
                         selection: 3,
                         edit_selection: 0,
                         selected: false,
+                    }
+                }
+                _ => {}
+            },
+            EditorState::EditingEventComponent {
+                object_id,
+                selection,
+            } => match key {
+                _ => {}
+            },
+            EditorState::EditingStatsComponent {
+                object_id,
+                selection,
+            } => match key {
+                KeyCode::Left => match STATS_COMPONENT_SELECTIONS[*selection] {
+                    "strength" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.strength = stats.strength.saturating_sub(1);
+                        }
+                    }
+                    "agility" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.agility = stats.agility.saturating_sub(1);
+                        }
+                    }
+                    "defense" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.defense = stats.defense.saturating_sub(1);
+                        }
+                    }
+                    "luck" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.luck = stats.luck.saturating_sub(1);
+                        }
+                    }
+                    "max_health" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.max_health = stats.max_health.saturating_sub(1);
+                        }
+                    }
+                    _ => {}
+                },
+                KeyCode::Right => match STATS_COMPONENT_SELECTIONS[*selection] {
+                    "strength" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.strength += 1;
+                        }
+                    }
+                    "agility" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.agility += 1;
+                        }
+                    }
+                    "defense" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.defense += 1;
+                        }
+                    }
+                    "luck" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.luck += 1;
+                        }
+                    }
+                    "max_health" => {
+                        if let Some(stats) = self.map.stats_components.get_mut(object_id) {
+                            stats.max_health += 1;
+                        }
+                    }
+                    _ => {}
+                },
+                KeyCode::Up => {
+                    *selection = (*selection + STATS_COMPONENT_SELECTIONS.len() - 1)
+                        % STATS_COMPONENT_SELECTIONS.len();
+                }
+                KeyCode::Down => {
+                    *selection = (*selection + 1) % STATS_COMPONENT_SELECTIONS.len();
+                }
+                KeyCode::Esc => {
+                    self.renderer.set_editor_message(EDITING_COMPONENT_MESSAGE);
+                    self.state = EditorState::SelectingComponent {
+                        object_id: *object_id,
+                        selection: 3,
                     }
                 }
                 _ => {}
@@ -468,7 +619,7 @@ pub fn run() -> io::Result<()> {
 
         execute!(stdout, cursor::MoveTo(0, 0))?;
 
-        editor.renderer.line_length = editor.renderer.render_editor(&editor);
+        editor.renderer.line_length = editor.renderer.render_editor(&editor).clone();
 
         stdout.flush()?;
 
