@@ -4,12 +4,14 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, execute, terminal};
 use rand;
 use std::io::{Write, stdout};
-use std::{i32, io};
+use std::path::Path;
+use std::{env, i32, io};
 
 use crate::game_object::{
-    COMBAT_SELECTIONS, CombatPhase, Dialogue, EnemyAttack, EventCondition, EventStep, GameEvent,
-    GameObjectID, Projectile, StatsComponent, TurnResult,
+    COMBAT_SELECTIONS, CombatPhase, EnemyAttack, EventCondition, GameEvent, GameObjectID,
+    Projectile, TurnResult,
 };
+use crate::level::{data_to_map, load_map, load_measurements};
 use crate::map::*;
 use crate::renderer::{Renderer, ScreenMeasurements};
 use crate::vector2::*;
@@ -61,131 +63,17 @@ impl Game {
         }
     }
 
-    pub fn setup_objects(&mut self) {
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(7, 6),
-            "♥︎".custom_color(CustomColor::new(255, 0, 0)),
-        ) {
-            self.map.insert_input_component(id);
-            self.map
-                .insert_stats_component(id, StatsComponent::new(1, 1, 1, 1, 10));
-            self.map.camera_operator = id;
-        }
-
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(9, 6),
-            "♥︎".custom_color(CustomColor::new(180, 0, 0)),
-        ) {
-            self.map.insert_event_component(
-                id,
-                vec![
-                    EventStep::new(
-                        GameEvent::Dialogue(Dialogue {
-                            text: "The demon king and his demon army is back.".to_string(),
-                            selections: vec![],
-                            selections_pointing_event: vec![],
-                            current_selection: 0,
-                        }),
-                        EventCondition::None,
-                        true,
-                        Some(1),
-                    ),
-                    EventStep::new(
-                        GameEvent::Dialogue(Dialogue {
-                            text: "Go! The world need you to save us from the evil!".to_string(),
-                            selections: vec![],
-                            selections_pointing_event: vec![],
-                            current_selection: 0,
-                        }),
-                        EventCondition::None,
-                        true,
-                        None,
-                    ),
-                ],
-            );
-        }
-
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(12, 4),
-            "♥︎".custom_color(CustomColor::new(255, 255, 0)),
-        ) {
-            self.map.insert_event_component(
-                id,
-                vec![EventStep::new(
-                    GameEvent::Dialogue(Dialogue {
-                        text: "I am so scared, ill pray and wish for you everyday brave knight."
-                            .to_string(),
-                        selections: vec![],
-                        selections_pointing_event: vec![],
-                        current_selection: 0,
-                    }),
-                    EventCondition::None,
-                    true,
-                    None,
-                )],
-            );
-        }
-
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(14, 4),
-            "♥︎".custom_color(CustomColor::new(0, 0, 255)),
-        ) {
-            self.map.insert_event_component(
-                id,
-                vec![EventStep::new(
-                    GameEvent::Dialogue(Dialogue {
-                        text: "I cannot understand demons, how can they be this evil? don't they feel bad when they try to sleep?."
-                            .to_string(),
-                        selections: vec![],
-                        selections_pointing_event: vec![],
-                        current_selection: 0,
-                    }),
-                    EventCondition::None,
-                    true,
-                    None,
-                )],
-            );
-        }
-
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(12, 8),
-            "♥︎".custom_color(CustomColor::new(0, 255, 255)),
-        ) {
-            self.map.insert_event_component(
-                id,
-                vec![EventStep::new(
-                    GameEvent::Dialogue(Dialogue {
-                        text: "i believe in you, your victory is going to be glorious!".to_string(),
-                        selections: vec![],
-                        selections_pointing_event: vec![],
-                        current_selection: 0,
-                    }),
-                    EventCondition::None,
-                    true,
-                    None,
-                )],
-            );
-        }
-        if let Some(id) = self.map.insert_object(
-            Vector2::new(14, 8),
-            "♥︎".custom_color(CustomColor::new(255, 0, 255)),
-        ) {
-            self.map.insert_event_component(
-                id,
-                vec![EventStep::new(
-                    GameEvent::Dialogue(Dialogue {
-                        text: "I pray that one day demons would understand their wrongdoings and try to do the right things.".to_string(),
-                        selections: vec![],
-                        selections_pointing_event: vec![],
-                        current_selection: 0,
-                    }),
-                    EventCondition::None,
-                    true,
-                    None,
-                )],
-            );
+    pub fn setup_renderer(&mut self) {
+        if let Some(measurements) = load_measurements(&"./measurements.ron") {
+            self.renderer = Renderer::new(measurements);
         }
     }
+    pub fn setup_map(&mut self) {
+        if let Some(map) = load_map(&"./map.ron") {
+            self.map = data_to_map(&map);
+        }
+    }
+
     pub fn process_input(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::Char('q') {
             println!("Quitting... \r");
@@ -242,7 +130,8 @@ impl Game {
         let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Dialogue(ref mut dialogue) = event.events[event.current_index].event {
-            if dialogue.selections.len() > 0 {
+            let len = dialogue.selections.len() as i32;
+            if len > 0 {
                 let new_index = (dialogue.current_selection as i32 + direction + len) % len;
                 dialogue.current_selection = new_index as usize;
             }
@@ -360,6 +249,8 @@ impl Game {
                             break 'none;
                         }
                         let Some(next_index) = event.events[event.current_index].next_event else {
+                            self.state = GameState::Normal;
+                            self.map.current_event_id = None;
                             break 'none;
                         };
                         self.map.stats_components.get_mut(&event_id)?.heal_to_max();
@@ -367,6 +258,7 @@ impl Game {
                         self.trigger_event(event_id);
                     }
                     GameEvent::TriggerObjectEvent(_) => {}
+                    GameEvent::None => {}
                 }
             }
         }
@@ -407,6 +299,7 @@ impl Game {
                 }
             }
             GameEvent::TriggerObjectEvent(_) => {}
+            GameEvent::None => {}
         }
 
         if let Some(event) = self.map.event_components.get_mut(&id) {
@@ -630,7 +523,30 @@ pub fn run() -> io::Result<()> {
     control::set_override(true);
 
     let mut game = Game::new();
-    game.setup_objects();
+    if cfg!(debug_assertions) {
+        let args: Vec<String> = env::args().collect();
+        if args.len() > 1 {
+            let folder_string = &args[1];
+            let folder_path = Path::new(folder_string);
+            if folder_path.is_dir() {
+                let measurements_path = folder_path.join("measurements.ron");
+                let map_path = folder_path.join("map.ron");
+                if let Some(m_str) = measurements_path.to_str() {
+                    if let Some(measurements) = load_measurements(m_str) {
+                        game.renderer = Renderer::new(measurements);
+                    }
+                }
+                if let Some(map_str) = map_path.to_str() {
+                    if let Some(map) = load_map(map_str) {
+                        game.map = data_to_map(&map);
+                    }
+                }
+            }
+        };
+    } else {
+        game.setup_renderer();
+        game.setup_map();
+    }
 
     let mut frame_number: i32 = 0;
     let mut last_frame = Instant::now();

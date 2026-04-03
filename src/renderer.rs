@@ -1,3 +1,4 @@
+#[cfg(not(feature = "editor"))]
 use colored::*;
 use serde::{Deserialize, Serialize};
 
@@ -941,7 +942,7 @@ impl Renderer {
     }
 
     #[cfg(not(feature = "editor"))]
-    pub fn render(&self, map: &Map, camera: &Vector2, state: &GameState) {
+    pub fn render(&mut self, map: &Map, camera: &Vector2, state: &GameState) {
         let Some(cam) = map.objects.get(&map.camera_operator) else {
             return;
         };
@@ -952,25 +953,23 @@ impl Renderer {
         );
 
         for y in 0..self.measurements.screen_size.y {
+            let mut size: usize = 0;
             match state {
                 GameState::Normal => {
                     self.render_map_line(map, camera, &mut buffer, y);
-                    buffer.push_str(&" ".repeat(
-                        self.measurements.dialogue_padding * 2
-                            + 1
-                            + self.measurements.dialogue_max_character_count,
-                    ));
+                    size = self.measurements.screen_size.x as usize;
                 }
                 GameState::Combat => {
                     self.render_combat_line(map, &mut buffer, y);
                 }
                 GameState::Dialogue => {
+                    size = self.measurements.screen_size.x as usize;
                     self.render_map_line(map, camera, &mut buffer, y);
-                    self.render_dialogue_line(map, &mut buffer, y);
+                    self.render_dialogue_line(map, &mut buffer, y, &mut size);
                 }
                 _ => {}
             }
-
+            self.pad_line(&mut buffer, y as usize, size);
             buffer.push_str("\r\n");
         }
 
@@ -994,10 +993,17 @@ impl Renderer {
         }
     }
 
-    fn render_dialogue_line(&self, map: &Map, buffer: &mut String, y: i32) -> Option<()> {
+    fn render_dialogue_line(
+        &self,
+        map: &Map,
+        buffer: &mut String,
+        y: i32,
+        raw_len: &mut usize,
+    ) -> Option<()> {
         buffer.push_str(&" ".repeat(self.measurements.dialogue_padding));
         buffer.push_str("|");
         buffer.push_str(&" ".repeat(self.measurements.dialogue_padding));
+        *raw_len += self.measurements.dialogue_padding + self.measurements.dialogue_padding + 1;
 
         let Some(event_id) = map.current_event_id else {
             return None;
@@ -1022,9 +1028,7 @@ impl Renderer {
                 .take(self.measurements.dialogue_max_character_count)
                 .collect();
             buffer.push_str(&line_text);
-            buffer.push_str(&" ".repeat(
-                self.measurements.dialogue_max_character_count - line_text.chars().count(),
-            ));
+            *raw_len += line_text.len()
         } else if dialogue_line_index
             >= text_line_count + self.measurements.dialogue_selection_text_padding
         {
@@ -1032,7 +1036,6 @@ impl Renderer {
                 - text_line_count
                 - self.measurements.dialogue_selection_text_padding;
             let Some(selection_text) = dialogue.selections.get(selection_line_index) else {
-                buffer.push_str(&" ".repeat(self.measurements.dialogue_max_character_count));
                 return None;
             };
 
@@ -1045,6 +1048,7 @@ impl Renderer {
             } else {
                 buffer.push_str(&selection_text);
             }
+            *raw_len += selection_text.len()
         }
 
         return None;

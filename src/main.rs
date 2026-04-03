@@ -7,7 +7,6 @@ mod editor;
 #[cfg(not(feature = "editor"))]
 mod game;
 mod game_object;
-#[cfg(feature = "editor")]
 mod level;
 mod map;
 mod renderer;

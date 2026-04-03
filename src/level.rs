@@ -137,13 +137,17 @@ pub fn save_measurements(data: &ScreenMeasurements, path: &str) -> std::io::Resu
     let s = ron::to_string(data).unwrap();
     std::fs::write(Path::new(path).join("measurements.ron"), s)
 }
-pub fn load_map(path: &str) -> MapData {
-    let s = std::fs::read_to_string(path).unwrap();
-    ron::from_str(&s).unwrap()
+pub fn load_map(path: &str) -> Option<MapData> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Some(ron::from_str(&s).unwrap()),
+        Err(_) => None,
+    }
 }
-pub fn load_measurements(path: &str) -> ScreenMeasurements {
-    let s = std::fs::read_to_string(path).unwrap();
-    ron::from_str(&s).unwrap()
+pub fn load_measurements(path: &str) -> Option<ScreenMeasurements> {
+    match std::fs::read_to_string(path) {
+        Ok(s) => Some(ron::from_str(&s).unwrap()),
+        Err(_) => None,
+    }
 }
 
 /// Converts MapData to Map IGNORE THIS FUNCTION
