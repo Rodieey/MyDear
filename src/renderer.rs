@@ -1,4 +1,3 @@
-#[cfg(not(feature = "editor"))]
 use colored::*;
 use serde::{Deserialize, Serialize};
 

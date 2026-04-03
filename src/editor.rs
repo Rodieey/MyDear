@@ -174,8 +174,13 @@ impl Editor {
             return false;
         }
 
-        self.map = data_to_map(&load_map(&map_path));
-        self.renderer = Renderer::new(load_measurements(&measurements_path));
+        if let Some(measurements) = load_measurements(&measurements_path) {
+            self.renderer = Renderer::new(measurements);
+        }
+        if let Some(map) = load_map(&map_path) {
+            self.map = data_to_map(&map);
+        }
+
         self.current_folder = folder;
         self.current_map = String::from("map.ron");
         add_recent_project(path);
