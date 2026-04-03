@@ -46,6 +46,7 @@ pub struct EventStepData {
 
 #[derive(Serialize, Deserialize)]
 pub enum GameEventData {
+    None,
     Dialogue(DialogueData),
     Combat(CombatData),
     TriggerObjectEvent(GameObjectID),
@@ -234,6 +235,7 @@ pub fn map_to_data(map: &Map) -> MapData {
                                 GameEvent::TriggerObjectEvent(id) => {
                                     GameEventData::TriggerObjectEvent(*id)
                                 }
+                                GameEvent::None => GameEventData::None,
                             },
                         })
                         .collect(),

@@ -73,6 +73,21 @@ pub struct Dialogue {
     pub selections_pointing_event: Vec<Option<usize>>,
     pub current_selection: usize,
 }
+impl Dialogue {
+    pub fn new(
+        text: String,
+        selections: Vec<String>,
+        selections_pointing_event: Vec<Option<usize>>,
+        current_selection: usize,
+    ) -> Self {
+        Dialogue {
+            text,
+            selections,
+            selections_pointing_event,
+            current_selection,
+        }
+    }
+}
 
 pub const COMBAT_SELECTIONS: &[&str] = &["Fight", "Item", "Run"];
 
@@ -172,14 +187,85 @@ impl Combat {
 }
 
 pub enum GameEvent {
+    None,
     Dialogue(Dialogue),
     Combat(Combat),
     TriggerObjectEvent(GameObjectID),
 }
+impl GameEvent {
+    pub fn next(&self) -> Self {
+        match self {
+            GameEvent::None => GameEvent::Dialogue(Dialogue::new(String::new(), vec![], vec![], 0)),
+            GameEvent::Dialogue(_) => GameEvent::Combat(Combat::new(
+                CombatPhase::PlayerTurn,
+                false,
+                false,
+                1,
+                "#".custom_color(CustomColor::new(255, 255, 255)),
+                1,
+                1,
+                1,
+                1,
+                false,
+            )),
+            GameEvent::Combat(_) => GameEvent::TriggerObjectEvent(0),
+            GameEvent::TriggerObjectEvent(_) => GameEvent::None,
+        }
+    }
+    pub fn prev(&self) -> Self {
+        match self {
+            GameEvent::None => GameEvent::TriggerObjectEvent(0),
+            GameEvent::Dialogue(_) => GameEvent::None,
+            GameEvent::Combat(_) => {
+                GameEvent::Dialogue(Dialogue::new(String::new(), vec![], vec![], 0))
+            }
+            GameEvent::TriggerObjectEvent(_) => GameEvent::Combat(Combat::new(
+                CombatPhase::PlayerTurn,
+                false,
+                false,
+                1,
+                "#".custom_color(CustomColor::new(255, 255, 255)),
+                1,
+                1,
+                1,
+                1,
+                false,
+            )),
+        }
+    }
+}
+
+pub fn game_event_to_string(game_event: &GameEvent) -> String {
+    match game_event {
+        GameEvent::None => "None".to_string(),
+        GameEvent::Dialogue(_) => "Dialogue".to_string(),
+        GameEvent::Combat(_) => "Combat".to_string(),
+        GameEvent::TriggerObjectEvent(id) => format!("TriggerObjectEvent({})", id),
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub enum EventCondition {
     None,
 }
+impl EventCondition {
+    pub fn next(&self) -> Self {
+        match self {
+            EventCondition::None => EventCondition::None,
+        }
+    }
+    pub fn prev(&self) -> Self {
+        match self {
+            EventCondition::None => EventCondition::None,
+        }
+    }
+}
+pub fn event_condition_to_string(event_condition: &EventCondition) -> String {
+    match event_condition {
+        EventCondition::None => "None".to_string(),
+    }
+}
+
 pub struct EventStep {
     pub event: GameEvent,
     pub requirement: EventCondition,

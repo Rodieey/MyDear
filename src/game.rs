@@ -242,8 +242,7 @@ impl Game {
         let event = self.map.event_components.get_mut(&event_id)?;
 
         if let GameEvent::Dialogue(ref mut dialogue) = event.events[event.current_index].event {
-            let len = dialogue.selections.len() as i32;
-            if len > 0 {
+            if dialogue.selections.len() > 0 {
                 let new_index = (dialogue.current_selection as i32 + direction + len) % len;
                 dialogue.current_selection = new_index as usize;
             }

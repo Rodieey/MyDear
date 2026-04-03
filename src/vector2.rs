@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::{Add, Div};
 
+use colored::{Colorize, CustomColor};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Copy, Clone, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -14,6 +15,22 @@ impl Vector2 {
     }
     pub fn zero() -> Self {
         Self { x: 0, y: 0 }
+    }
+
+    pub fn to_colored_string(
+        &self,
+        x_color: CustomColor,
+        y_color: CustomColor,
+        punctuation_color: CustomColor,
+    ) -> String {
+        format!(
+            "{}{}{}{}{}",
+            "(".custom_color(punctuation_color).to_string(),
+            self.x.to_string().custom_color(x_color).to_string(),
+            ", ".custom_color(punctuation_color).to_string(),
+            self.y.to_string().custom_color(y_color).to_string(),
+            ")".custom_color(punctuation_color).to_string(),
+        )
     }
 }
 impl Div<i32> for &Vector2 {
